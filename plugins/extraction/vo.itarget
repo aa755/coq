@@ -1,3 +1,10 @@
+ExtrHaskellBasic.vo
+ExtrHaskellNatInt.vo
+ExtrHaskellNatInteger.vo
+ExtrHaskellZNum.vo
+ExtrHaskellZInt.vo
+ExtrHaskellZInteger.vo
+ExtrHaskellString.vo
 ExtrOcamlBasic.vo
 ExtrOcamlIntConv.vo
 ExtrOcamlBigIntConv.vo
