@@ -63,7 +63,7 @@ CSDPCERT:=plugins/micromega/csdpcert$(EXE)
 CORESRCDIRS:=\
   config 	lib		kernel		kernel/byterun	library \
   proofs 	tactics 	pretyping	interp		stm \
-  toplevel	parsing	printing	grammar	        intf
+  toplevel	parsing	printing	grammar	        intf	dev
 
 PLUGINS:=\
   omega		romega 		micromega 	quote \
@@ -168,7 +168,7 @@ BYTERUN:=$(addprefix kernel/byterun/, \
 CORECMA:=lib/clib.cma lib/lib.cma kernel/kernel.cma library/library.cma \
         pretyping/pretyping.cma interp/interp.cma proofs/proofs.cma \
         parsing/parsing.cma printing/printing.cma tactics/tactics.cma \
-	stm/stm.cma toplevel/toplevel.cma parsing/highparsing.cma tactics/hightactics.cma
+	stm/stm.cma toplevel/toplevel.cma parsing/highparsing.cma tactics/hightactics.cma dev/printers.cma
 
 TOPLOOPCMA:=stm/proofworkertop.cma stm/tacworkertop.cma stm/queryworkertop.cma
 
