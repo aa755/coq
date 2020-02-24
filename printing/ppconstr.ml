@@ -92,6 +92,7 @@ let tag_var = tag Tag.variable
     let env = ref terms and envlist = ref termlists and bl = ref binders and bll = ref binderlists in
     let pop r = let a = List.hd !r in r := List.tl !r; a in
     let return unp pp1 pp2 = (tag_unparsing unp pp1) ++ pp2 in
+    let parens = !Constrextern.print_parentheses in
     (* Warning:
        The following function enforces a very precise order of
        evaluation of sub-components.
@@ -102,7 +103,7 @@ let tag_var = tag Tag.variable
       | UnpMetaVar (_, prec) as unp :: l ->
         let c = pop env in
         let pp2 = aux l in
-        let pp1 = pr (n, prec) c in
+        let pp1 = pr (n, if parens then Prec 0 else prec) c in
         return unp pp1 pp2
       | UnpBinderMetaVar (_, prec) as unp :: l ->
         let c = pop bl in
@@ -111,7 +112,7 @@ let tag_var = tag Tag.variable
         return unp pp1 pp2
       | UnpListMetaVar (_, prec, sl) as unp :: l ->
         let cl = pop envlist in
-        let pp1 = prlist_with_sep (fun () -> aux sl) (pr (n,prec)) cl in
+        let pp1 = prlist_with_sep (fun () -> aux sl) (pr (n, if parens then Prec 0 else prec)) cl in
         let pp2 = aux l in
         return unp pp1 pp2
       | UnpBinderListMetaVar (_, isopen, sl) as unp :: l ->
