@@ -222,13 +222,16 @@ let absolute_file_name basename odir =
     after processing all options and silently give the default one if
     it hasn't. We may also use this to warn if ap hysical path is met
     twice.*)
-let register_dir_logpath,find_dir_logpath =
+let register_dir_logpath,find_dir_logpath,find_physpath =
   let tbl: (string, string list) Hashtbl.t = Hashtbl.create 19 in
+  let tbl_rev: (string list, string) Hashtbl.t = Hashtbl.create 19 in
   let reg physdir logpath =
     coqdep_warning "adding (%s, %s)" (absolute_dir physdir) (String.concat " " logpath);
-    Hashtbl.add tbl (absolute_dir physdir) logpath in
-  let fnd physdir = Hashtbl.find tbl (absolute_dir physdir) in
-  reg,fnd
+    Hashtbl.add tbl (absolute_dir physdir) logpath ;
+    Hashtbl.add tbl_rev logpath (absolute_dir physdir) in
+  let fndl physdir = Hashtbl.find tbl (absolute_dir physdir) in
+  let fndp logpath = Hashtbl.find tbl_rev logpath in
+  reg,fndl,fndp
 
 let file_name s = function
   | None     -> s
@@ -382,6 +385,9 @@ let string_of_dependency_list suffix_for_require deps =
     in
   String.concat " " (List.map string_of_dep deps)
 
+let phys_path (logpath: string list) : string =
+  (String.concat "/" logpath)
+
 let rec find_dependencies basename =
   let verbose = true in (* for past/future use? *)
   try
@@ -424,7 +430,7 @@ let rec find_dependencies basename =
                       | Some pth -> pth @ str
                       in
                   warning_module_notfound f str;
-                  add_dep (DepRequire (String.concat "/" str))
+                  add_dep (DepRequire (phys_path str))
               end) strl
         | Declare sl ->
             let declare suff dir s =
