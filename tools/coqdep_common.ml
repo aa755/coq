@@ -224,7 +224,9 @@ let absolute_file_name basename odir =
     twice.*)
 let register_dir_logpath,find_dir_logpath =
   let tbl: (string, string list) Hashtbl.t = Hashtbl.create 19 in
-  let reg physdir logpath = Hashtbl.add tbl (absolute_dir physdir) logpath in
+  let reg physdir logpath =
+    coqdep_warning "adding (%s, %s)" (absolute_dir physdir) (String.concat " " logpath);
+    Hashtbl.add tbl (absolute_dir physdir) logpath in
   let fnd physdir = Hashtbl.find tbl (absolute_dir physdir) in
   reg,fnd
 
@@ -408,6 +410,7 @@ let rec find_dependencies basename =
         let tok = coq_action buf in
         match tok with
         | Require (from, strl) ->
+
             List.iter (fun str ->
               if should_visit_v_and_mark from str then begin
               try
@@ -420,7 +423,8 @@ let rec find_dependencies basename =
                       | None -> str
                       | Some pth -> pth @ str
                       in
-                  warning_module_notfound f str
+                  warning_module_notfound f str;
+                  add_dep (DepRequire (String.concat "/" str))
               end) strl
         | Declare sl ->
             let declare suff dir s =
