@@ -230,13 +230,10 @@ let register_dir_logpath,find_dir_logpath,find_physpath =
   let tbl: (string, string list) Hashtbl.t = Hashtbl.create 19 in
   let tbl_rev: (string list, string) Hashtbl.t = Hashtbl.create 19 in
   let reg physdir logpath =
-    coqdep_warning "adding (%s, %s)" (absolute_dir physdir) (String.concat " " logpath);
     Hashtbl.add tbl (absolute_dir physdir) logpath ;
     Hashtbl.add tbl_rev logpath (absolute_dir physdir) in
   let fndl physdir = Hashtbl.find tbl (absolute_dir physdir) in
-  let fndp logpath =
-    let r= Hashtbl.find_opt tbl_rev logpath in
-    coqdep_warning "find (%s, %s)" (String.concat " " logpath) (ops r) ;r in
+  let fndp logpath = Hashtbl.find_opt tbl_rev logpath in
   reg,fndl,fndp
 
 let file_name s = function
