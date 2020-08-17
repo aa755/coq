@@ -199,7 +199,6 @@ let init_execution opts custom_init =
   Global.set_VM opts.config.enable_VM;
   Flags.set_native_compiler (match opts.config.native_compiler with NativeOff -> false | NativeOn _ -> true);
   Global.set_native_compiler (match opts.config.native_compiler with NativeOff -> false | NativeOn _ -> true);
-  if opts.config.logic.cumulative_sprop then Global.make_sprop_cumulative ();
 
   (* Native output dir *)
   Nativelib.output_dir := opts.config.native_output_dir;
@@ -244,13 +243,13 @@ let init_document opts =
   (* Next line allows loading .vos files when in interactive mode *)
   Flags.load_vos_libraries := true;
   let ml_load_path, vo_load_path = build_load_path opts in
-  let require_libs = require_libs opts in
+  let injections = injection_commands opts in
   let stm_options = opts.config.stm_flags in
   let open Vernac.State in
   let doc, sid =
     Stm.(new_doc
            { doc_type = Interactive opts.config.logic.toplevel_name;
-             ml_load_path; vo_load_path; require_libs; stm_options;
+             ml_load_path; vo_load_path; injections; stm_options;
            }) in
   { doc; sid; proof = None; time = opts.config.time }
 
@@ -274,7 +273,6 @@ type run_mode = Interactive | Batch
 let init_toploop opts =
   let state = init_document opts in
   let state = Ccompile.load_init_vernaculars opts ~state in
-  Ccompile.set_options opts.config.set_options;
   state
 
 let coqtop_init run_mode ~opts =

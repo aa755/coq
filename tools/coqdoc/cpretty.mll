@@ -316,7 +316,7 @@ let identifier =
 (* This misses unicode stuff, and it adds "[" and "]".  It's only an
    approximation of idents - used for detecting whether an underscore
    is part of an identifier or meant to indicate emphasis *)
-let nonidentchar = [^ 'A'-'Z' 'a'-'z' '_' '[' ']' '\'' '0'-'9' '@' ]
+let nonidentchar = [^ 'A'-'Z' 'a'-'z' '_' '[' ']' '\'' '0'-'9' '@' '\"' '\'' '`']
 
 let printing_token = [^ ' ' '\t']*
 
@@ -504,9 +504,9 @@ rule coq_bol = parse
       { Lexing.new_line lexbuf; begin_show (); coq_bol lexbuf }
   | space* end_show nl
       { Lexing.new_line lexbuf; end_show (); coq_bol lexbuf }
-  | space* begin_details nl
-      { Lexing.new_line lexbuf;
-        let s = details_body lexbuf in
+  | space* begin_details (* At this point, the comment remains open,
+                            and will be closed by [details_body] *)
+      { let s = details_body lexbuf in
         Output.end_coq (); begin_details s; Output.start_coq (); coq_bol lexbuf }
   | space* end_details nl
       { Lexing.new_line lexbuf;
@@ -728,7 +728,7 @@ and doc_bol = parse
           else
             Output.section lev (fun () -> ignore (doc None (from_string s)));
 	    if eol then doc_bol lexbuf else doc None lexbuf }
-  | (space_nl* as s) ('-'+ as line)
+  | ((space_nl* nl)? as s) (space* '-'+ as line)
       { let nl_count = count_newlines s in
         match check_start_list line with
           | Neither -> backtrack_past_newline lexbuf; Lexing.new_line lexbuf; doc None lexbuf

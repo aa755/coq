@@ -195,13 +195,14 @@ let build_wellfounded (recname,pl,bl,arityc,body) poly r measure notation =
   let lift_lets = lift_rel_context 1 letbinders in
   let sigma, intern_body =
     let ctx = LocalAssum (make_annot (Name recname) Sorts.Relevant, get_type curry_fun) :: binders_rel in
-    let (r, impls, scopes) =
-      Constrintern.compute_internalization_data env sigma
+    let interning_data =
+      Constrintern.compute_internalization_data env sigma recname
         Constrintern.Recursive full_arity impls
     in
     let newimpls = Id.Map.singleton recname
-        (r, impls @ [Some (ExplByName (Id.of_string "recproof"), Impargs.Manual, (true, false))],
-         scopes @ [None]) in
+        (Constrintern.extend_internalization_data interning_data
+           (Some (ExplByName (Id.of_string "recproof"), Impargs.Manual, (true, false)))
+           None) in
     interp_casted_constr_evars ~program_mode:true (push_rel_context ctx env) sigma
       ~impls:newimpls body (lift 1 top_arity)
   in
@@ -229,7 +230,7 @@ let build_wellfounded (recname,pl,bl,arityc,body) poly r measure notation =
       let name = add_suffix recname "_func" in
       (* XXX: Mutating the evar_map in the hook! *)
       (* XXX: Likely the sigma is out of date when the hook is called .... *)
-      let hook sigma { DeclareDef.Hook.S.dref; _ } =
+      let hook sigma { Declare.Hook.S.dref; _ } =
         let sigma, h_body = Evarutil.new_global sigma dref in
         let body = it_mkLambda_or_LetIn (mkApp (h_body, [|make|])) binders_rel in
         let ty = it_mkProd_or_LetIn top_arity binders_rel in
@@ -247,13 +248,13 @@ let build_wellfounded (recname,pl,bl,arityc,body) poly r measure notation =
       hook, name, typ
     else
       let typ = it_mkProd_or_LetIn top_arity binders_rel in
-      let hook sigma { DeclareDef.Hook.S.dref; _ } =
+      let hook sigma { Declare.Hook.S.dref; _ } =
         if Impargs.is_implicit_args () || not (List.is_empty impls) then
           Impargs.declare_manual_implicits false dref impls
       in hook, recname, typ
   in
   (* XXX: Capturing sigma here... bad bad *)
-  let hook = DeclareDef.Hook.make (hook sigma) in
+  let hook = Declare.Hook.make (hook sigma) in
   RetrieveObl.check_evars env sigma;
   let evars, _, evars_def, evars_typ =
     RetrieveObl.retrieve_obligations env recname sigma 0 def typ
@@ -289,7 +290,7 @@ let do_program_recursive ~scope ~poly fixkind fixl =
     let evars, _, def, typ =
       RetrieveObl.retrieve_obligations env name evm
         (List.length rec_sign) def typ in
-    ({ DeclareDef.Recthm.name; typ; impargs; args = [] }, def, evars)
+    ({ Declare.Recthm.name; typ; impargs; args = [] }, def, evars)
   in
   let (fixnames,fixrs,fixdefs,fixtypes) = fix in
   let fiximps = List.map pi2 info in

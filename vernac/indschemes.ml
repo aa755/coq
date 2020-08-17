@@ -91,12 +91,11 @@ let () =
       optwrite = (fun b -> rewriting_flag := b) }
 
 (* Util *)
-
 let define ~poly name sigma c types =
-  let f = declare_constant ~kind:Decls.(IsDefinition Scheme) in
   let univs = Evd.univ_entry ~poly sigma in
   let entry = Declare.definition_entry ~univs ?types c in
-  let kn = f ~name (DefinitionEntry entry) in
+  let kind = Decls.(IsDefinition Scheme) in
+  let kn = declare_constant ~kind ~name (DefinitionEntry entry) in
   definition_message name;
   kn
 
@@ -143,7 +142,7 @@ let try_declare_scheme what f internal names kn =
     | UndefinedCst s ->
         alarm what internal
           (strbrk "Required constant " ++ str s ++ str " undefined.")
-    | AlreadyDeclared (kind, id) as exn ->
+    | DeclareUniv.AlreadyDeclared (kind, id) as exn ->
       let msg = CErrors.print exn in
       alarm what internal msg
     | DecidabilityMutualNotSupported ->

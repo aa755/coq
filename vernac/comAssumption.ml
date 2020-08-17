@@ -87,11 +87,10 @@ let context_set_of_entry = function
   | Monomorphic_entry uctx -> uctx
 
 let declare_assumptions ~poly ~scope ~kind univs nl l =
-  let open DeclareDef in
-  let () = match scope with
+  let () = let open Declare in match scope with
     | Discharge ->
       (* declare universes separately for variables *)
-      Declare.declare_universe_context ~poly (context_set_of_entry (fst univs))
+      DeclareUctx.declare_universe_context ~poly (context_set_of_entry (fst univs))
     | Global _ -> ()
   in
   let _, _ = List.fold_left (fun (subst,univs) ((is_coe,idl),typ,imps) ->
@@ -100,10 +99,10 @@ let declare_assumptions ~poly ~scope ~kind univs nl l =
       let univs,subst' =
         List.fold_left_map (fun univs id ->
             let refu = match scope with
-              | Discharge ->
+              | Declare.Discharge ->
                 declare_variable is_coe ~kind typ imps Glob_term.Explicit id;
                 GlobRef.VarRef id.CAst.v, Univ.Instance.empty
-              | Global local ->
+              | Declare.Global local ->
                 declare_axiom is_coe ~local ~poly ~kind typ univs imps nl id
             in
             next_univs univs, (id.CAst.v, Constr.mkRef refu))
@@ -130,7 +129,7 @@ let process_assumptions_udecls ~scope l =
       udecl, id
     | (_, ([], _))::_ | [] -> assert false
   in
-  let open DeclareDef in
+  let open Declare in
   let () = match scope, udecl with
     | Discharge, Some _ ->
       let loc = first_id.CAst.loc in
@@ -161,7 +160,7 @@ let do_assumptions ~program_mode ~poly ~scope ~kind nl l =
     let env =
       EConstr.push_named_context (List.map (fun {CAst.v=id} -> LocalAssum (make_annot id r,t)) idl) env in
     let ienv = List.fold_right (fun {CAst.v=id} ienv ->
-      let impls = compute_internalization_data env sigma Variable t imps in
+      let impls = compute_internalization_data env sigma id Variable t imps in
       Id.Map.add id impls ienv) idl ienv in
       ((sigma,env,ienv),((is_coe,idl),t,imps)))
     (sigma,env,empty_internalization_env) l
@@ -191,7 +190,7 @@ let context_subst subst (name,b,t,impl) =
 
 let context_insection sigma ~poly ctx =
   let uctx = Evd.universe_context_set sigma in
-  let () = Declare.declare_universe_context ~poly uctx in
+  let () = DeclareUctx.declare_universe_context ~poly uctx in
   let fn subst (name,_,_,_ as d) =
     let d = context_subst subst d in
     let () = match d with
@@ -208,7 +207,7 @@ let context_insection sigma ~poly ctx =
         let uctx = Evd.evar_universe_context sigma in
         let kind = Decls.(IsDefinition Definition) in
         let _ : GlobRef.t =
-          DeclareDef.declare_entry ~name ~scope:DeclareDef.Discharge
+          Declare.declare_entry ~name ~scope:Declare.Discharge
             ~kind ~impargs:[] ~uctx entry
         in
         ()
@@ -226,7 +225,7 @@ let context_nosection sigma ~poly ctx =
       (* Multiple monomorphic axioms: declare universes separately to
          avoid redeclaring them. *)
       let uctx = Evd.universe_context_set sigma in
-      let () = Declare.declare_universe_context ~poly uctx in
+      let () = DeclareUctx.declare_universe_context ~poly uctx in
       Monomorphic_entry Univ.ContextSet.empty
   in
   let fn subst d =
@@ -271,11 +270,14 @@ let context ~poly l =
       in
       let b = Option.map (EConstr.to_constr sigma) b in
       let t = EConstr.to_constr sigma t in
-      let test x = match x.CAst.v with
-        | Some (Name id',_) -> Id.equal name id'
-        | _ -> false
+      let impl = let open Glob_term in
+      let search x = match x.CAst.v with
+        | Some (Name id',max) when Id.equal name id' ->
+          Some (if max then MaxImplicit else NonMaxImplicit)
+        | _ -> None
+        in
+        try CList.find_map search impls with Not_found -> Explicit
       in
-      let impl = Glob_term.(if List.exists test impls then MaxImplicit else Explicit) in (* ??? *)
       name,b,t,impl)
       ctx
   in

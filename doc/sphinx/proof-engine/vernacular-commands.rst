@@ -11,14 +11,14 @@ Displaying
 
 .. _Print:
 
-.. cmd:: Print {? Term } @smart_qualid {? @univ_name_list }
+.. cmd:: Print {? Term } @reference {? @univ_name_list }
 
    .. insertprodn univ_name_list univ_name_list
 
    .. prodn::
       univ_name_list ::= @%{ {* @name } %}
 
-   Displays definitions of terms, including opaque terms, for the object :n:`@smart_qualid`.
+   Displays definitions of terms, including opaque terms, for the object :n:`@reference`.
 
    * :n:`Term` - a syntactic marker to allow printing a term
      that is the same as one of the various :n:`Print` commands.  For example,
@@ -26,7 +26,7 @@ Displaying
      information on the object whose name is ":n:`All`".
 
    * :n:`@univ_name_list` - locally renames the
-     polymorphic universes of :n:`@smart_qualid`.
+     polymorphic universes of :n:`@reference`.
      The name `_` means the usual name is printed.
 
    .. exn:: @qualid not a defined object.
@@ -56,115 +56,6 @@ Displaying
    .. todo: "A.B" is permitted but unnecessary for modules/sections.
       should the command just take an @ident?
 
-
-.. _flags-options-tables:
-
-Flags, Options and Tables
------------------------------
-
-Coq has many settings to control its behavior.  Setting types include flags, options
-and tables:
-
-* A *flag* has a boolean value, such as :flag:`Asymmetric Patterns`.
-* An *option* generally has a numeric or string value, such as :opt:`Firstorder Depth`.
-* A *table* contains a set of strings or qualids.
-* In addition, some commands provide settings, such as :cmd:`Extraction Language`.
-
-.. FIXME Convert "Extraction Language" to an option.
-
-Flags, options and tables are identified by a series of identifiers, each with an initial
-capital letter.
-
-.. cmd:: Set @setting_name {? {| @int | @string } }
-   :name: Set
-
-   .. insertprodn setting_name setting_name
-
-   .. prodn::
-      setting_name ::= {+ @ident }
-
-   If :n:`@setting_name` is a flag, no value may be provided; the flag
-   is set to on.
-   If :n:`@setting_name` is an option, a value of the appropriate type
-   must be provided; the option is set to the specified value.
-
-   This command supports the :attr:`local`, :attr:`global` and :attr:`export` attributes.
-   They are described :ref:`here <set_unset_scope_qualifiers>`.
-
-   .. warn:: There is no option @setting_name.
-
-      This message also appears for unknown flags.
-
-.. cmd:: Unset @setting_name
-   :name: Unset
-
-   If :n:`@setting_name` is a flag, it is set to off.  If :n:`@setting_name` is an option, it is
-   set to its default value.
-
-   This command supports the :attr:`local`, :attr:`global` and :attr:`export` attributes.
-   They are described :ref:`here <set_unset_scope_qualifiers>`.
-
-.. cmd:: Add @setting_name {+ {| @qualid | @string } }
-
-   Adds the specified values to the table :n:`@setting_name`.
-
-.. cmd:: Remove @setting_name {+ {| @qualid | @string } }
-
-   Removes the specified value from the table :n:`@setting_name`.
-
-.. cmd:: Test @setting_name {? for {+ {| @qualid | @string } } }
-
-   If :n:`@setting_name` is a flag or option, prints its current value.
-   If :n:`@setting_name` is a table: if the `for` clause is specified, reports
-   whether the table contains each specified value, otherise this is equivalent to
-   :cmd:`Print Table`.  The `for` clause is not valid for flags and options.
-
-.. cmd:: Print Options
-
-   Prints the current value of all flags and options, and the names of all tables.
-
-.. cmd:: Print Table @setting_name
-
-   Prints the values in the table :n:`@setting_name`.
-
-.. cmd:: Print Tables
-
-   A synonym for :cmd:`Print Options`.
-
-.. _set_unset_scope_qualifiers:
-
-Locality attributes supported by :cmd:`Set` and :cmd:`Unset`
-````````````````````````````````````````````````````````````
-
-The :cmd:`Set` and :cmd:`Unset` commands support the :attr:`local`,
-:attr:`global` and :attr:`export` locality attributes:
-
-* no attribute: the original setting is *not* restored at the end of
-  the current module or section.
-* :attr:`local` (an alternative syntax is to use the ``Local``
-  prefix): the setting is applied within the current module or
-  section.  The original value of the setting is restored at the end
-  of the current module or section.
-* :attr:`export` (an alternative syntax is to use the ``Export``
-  prefix): similar to :attr:`local`, the original value of the setting
-  is restored at the end of the current module or section.  In
-  addition, if the value is set in a module, then :cmd:`Import`\-ing
-  the module sets the option or flag.
-* :attr:`global` (an alternative syntax is to use the ``Global``
-  prefix): the original setting is *not* restored at the end of the
-  current module or section.  In addition, if the value is set in a
-  file, then :cmd:`Require`\-ing the file sets the option.
-
-Newly opened modules and sections inherit the current settings.
-
-.. note::
-
-   The use of the :attr:`global` attribute with the :cmd:`Set` and
-   :cmd:`Unset` commands is discouraged.  If your goal is to define
-   project-wide settings, you should rather use the command-line
-   arguments ``-set`` and ``-unset`` for setting flags and options
-   (cf. :ref:`command-line-options`).
-
 Query commands
 --------------
 
@@ -174,14 +65,15 @@ If no selector is provided,
 the command applies to the current goal.  If no proof is open, then the command only applies
 to accessible objects.  (see Section :ref:`invocation-of-tactics`).
 
-.. cmd:: About @smart_qualid {? @univ_name_list }
+.. cmd:: About @reference {? @univ_name_list }
 
-   Displays information about the :n:`@smart_qualid` object, which,
+   Displays information about the :n:`@reference` object, which,
    if a proof is open,  may be a hypothesis of the selected goal,
    or an accessible theorem, axiom, etc.:
    its kind (module, constant, assumption, inductive,
    constructor, abbreviation, …), long name, type, implicit arguments and
-   argument scopes. It does not print the body of definitions or proofs.
+   argument scopes (as set in the definition of :token:`reference` or
+   subsequently with the :cmd:`Arguments` command). It does not print the body of definitions or proofs.
 
 .. cmd:: Check @term
 
@@ -204,38 +96,115 @@ to accessible objects.  (see Section :ref:`invocation-of-tactics`).
 
    .. seealso:: Section :ref:`performingcomputations`.
 
-.. cmd:: Search {+ {? - } @search_item } {? {| inside | outside } {+ @qualid } }
+.. cmd:: Search {+ @search_query } {? {| inside | outside } {+ @qualid } }
+
+   This command can be used to filter the goal and the global context
+   to retrieve objects whose name or type satisfies a number of
+   conditions.  Library files that were not loaded with :cmd:`Require`
+   are not considered.  The :table:`Search Blacklist` table can also
+   be used to exclude some things from all calls to :cmd:`Search`.
+
+   The output of the command is a list of qualified identifiers and
+   their types.  If the :flag:`Search Output Name Only` flag is on,
+   the types are omitted.
+
+   .. insertprodn search_query search_query
+
+   .. prodn::
+      search_query ::= @search_item
+      | - @search_query
+      | [ {+| {+ @search_query } } ]
+
+   Multiple :n:`@search_item`\s can be combined into a complex
+   :n:`@search_query`:
+
+   :n:`- @search_query`
+      Excludes the objects that would be filtered by
+      :n:`@search_query`.  See :ref:`this example
+      <search-disambiguate-notation>`.
+
+   :n:`[ {+ @search_query } | ... | {+ @search_query } ]`
+      This is a disjunction of conjunctions of queries.  A simple
+      conjunction can be expressed by having a single disjunctive
+      branch.  For a conjunction at top-level, the surrounding
+      brackets are not required.
 
    .. insertprodn search_item search_item
 
    .. prodn::
-      search_item ::= @one_term
-      | @string {? % @scope }
+      search_item ::= {? {| head | hyp | concl | headhyp | headconcl } : } @string {? % @scope_key }
+      | {? {| head | hyp | concl | headhyp | headconcl } : } @one_term
+      | is : @logical_kind
 
-   Displays the name and type of all hypotheses of the
-   selected goal (if any) and theorems of the current context
-   matching :n:`@search_item`\s.
-   It's useful for finding the names of library lemmas.
+   Searched objects can be filtered by patterns, by the constants they
+   contain (identified by their name or a notation) and by their
+   names.
+   The location of the pattern or constant within a term
 
-   * :n:`@one_term` - Search for objects containing a subterm matching the pattern
-     :n:`@one_term` in which holes of the pattern are indicated by `_` or :n:`?@ident`.
-     If the same :n:`?@ident` occurs more than once in the pattern, all occurrences must
-     match the same value.
+   :n:`@one_term`
+      Search for objects whose type contains a subterm matching the
+      pattern :n:`@one_term`.  Holes of the pattern are indicated by
+      `_` or :n:`?@ident`.  If the same :n:`?@ident` occurs more than
+      once in the pattern, all occurrences in the subterm must be
+      identical.  See :ref:`this example <search-pattern>`.
 
-   * :n:`@string` - If :n:`@string` is a substring of a valid identifier,
-     search for objects whose name contains :n:`@string`. If :n:`@string` is a notation
-     string associated with a :n:`@qualid`, that's equivalent to :cmd:`Search` :n:`@qualid`.
-     For example, specifying `"+"` or `"_ + _"`, which are notations for `Nat.add`, are equivalent
-     to :cmd:`Search` `Nat.add`.
+   :n:`@string {? % @scope_key }`
+      - If :n:`@string` is a substring of a valid identifier and no
+        :n:`% @scope_key` is provided, search for objects whose name
+        contains :n:`@string`.  See :ref:`this example
+        <search-part-ident>`.
 
-   * :n:`% @scope` - limits the search to the scope bound to
-     the delimiting key :n:`@scope`, such as, for example, :n:`%nat`.
-     This clause may be used only if :n:`@string` contains a notation string.
-     (see Section :ref:`LocalInterpretationRulesForNotations`)
+      - Otherwise, search for objects
+        whose type contains the reference that this string,
+        interpreted as a notation, is attached to (as described in
+        :n:`@reference`).  See :ref:`this example <search-by-notation>`.
 
-   If you specify multiple :n:`@search_item`\s, all the conditions must be satisfied
-   for the object to be displayed.  The minus sign `-` excludes objects that contain
-   the :n:`@search_item`.
+     .. note::
+
+        To refer to a string used in a notation that is a substring of a valid identifier,
+        put it between single quotes or explicitly provide a scope.
+        See :ref:`this example <search-disambiguate-notation>`.
+
+   :n:`hyp:`
+      The provided pattern or reference is matched against any subterm
+      of an hypothesis of the type of the objects.  See :ref:`this
+      example <search-hyp>`.
+
+   :n:`headhyp:`
+      The provided pattern or reference is matched against the
+      subterms in head position (any partial applicative subterm) of
+      the hypotheses of the type of the objects.  See :ref:`the
+      previous example <search-hyp>`.
+
+   :n:`concl:`
+      The provided pattern or reference is matched against any subterm
+      of the conclusion of the type of the objects.  See :ref:`this
+      example <search-concl>`.
+
+   :n:`headconcl:`
+      The provided pattern or reference is matched against the
+      subterms in head position (any partial applicative subterm) of
+      the conclusion of the type of the objects.  See :ref:`the
+      previous example <search-concl>`.
+
+   :n:`head:`
+      This is simply the union between `headconcl:` and `headhyp:`.
+
+   :n:`is: @logical_kind`
+      .. insertprodn logical_kind logical_kind
+
+      .. prodn::
+         logical_kind ::= {| @thm_token | @assumption_token }
+         | {| Definition | Example | Context | Primitive }
+         | {| Coercion | Instance | Scheme | Canonical | SubClass }
+         | {| Field | Method }
+
+      Filters objects by the keyword that was used to define them
+      (`Theorem`, `Lemma`, `Axiom`, `Variable`, `Context`,
+      `Primitive`...) or its status (`Coercion`, `Instance`, `Scheme`,
+      `Canonical`, `SubClass`, Field` for record fields, `Method` for class
+      fields).  Note that `Coercion`\s, `Canonical Structure`\s, Instance`\s and `Scheme`\s can be
+      defined without using those keywords.  See :ref:`this example <search-by-keyword>`.
 
    Additional clauses:
 
@@ -247,32 +216,123 @@ to accessible objects.  (see Section :ref:`invocation-of-tactics`).
       There is no constant in the environment named :n:`@qualid`, where :n:`@qualid`
       is in an `inside` or `outside` clause.
 
-   .. example:: :cmd:`Search` examples
+   .. _search-pattern:
 
-      .. coqtop:: in
+   .. example:: Searching for a pattern
 
-         Require Import ZArith.
+      .. coqtop:: none reset
+
+         Require Import PeanoNat.
+
+      We can repeat meta-variables to narrow down the search.  Here,
+      we are looking for commutativity lemmas.
 
       .. coqtop:: all
 
-         Search Z.mul Z.add "distr".
-         Search "+"%Z "*"%Z "distr" -Prop.
-         Search (?x * _ + ?x * _)%Z outside OmegaLemmas.
+         Search (_ ?n ?m = _ ?m ?n).
 
+   .. _search-part-ident:
+
+   .. example:: Searching for part of an identifier
+
+      .. coqtop:: all reset
+
+         Search "_assoc".
+
+   .. _search-by-notation:
+
+   .. example:: Searching for a reference by notation
+
+      .. coqtop:: all reset
+
+         Search "+".
+
+   .. _search-disambiguate-notation:
+
+   .. example:: Disambiguating between part of identifier and notation
+
+      .. coqtop:: none reset
+
+         Require Import PeanoNat.
+
+      In this example, we show two ways of searching for all the
+      objects whose type contains `Nat.modulo` but which do not
+      contain the substring "mod".
+
+      .. coqtop:: all
+
+         Search "'mod'" -"mod".
+         Search "mod"%nat -"mod".
+
+   .. _search-hyp:
+
+   .. example:: Search in hypotheses
+
+      The following search shows the objects whose type contains
+      `bool` in an hypothesis as a strict subterm only:
+
+      .. coqtop:: none reset
+
+         Add Search Blacklist "internal_".
+
+      .. coqtop:: all
+
+         Search hyp:bool -headhyp:bool.
+
+   .. _search-concl:
+
+   .. example:: Search in conclusion
+
+      The following search shows the objects whose type contains `bool`
+      in the conclusion as a strict subterm only:
+
+      .. coqtop:: all
+
+         Search concl:bool -headconcl:bool.
+
+   .. _search-by-keyword:
+
+   .. example:: Search by keyword or status
+
+      The following search shows the definitions whose type is a `nat`
+      or a function which returns a `nat` and the lemmas about `+`:
+
+      .. coqtop:: all reset
+
+         Search [ is:Definition headconcl:nat | is:Lemma (_ + _) ].
+
+      The following search shows the instances whose type includes the
+      classes `Reflexive` or `Symmetric`:
+
+      .. coqtop:: none reset
+
+         Require Import Morphisms.
+
+      .. coqtop:: all
+
+         Search is:Instance [ Reflexive | Symmetric ].
 
 .. cmd:: SearchHead @one_term {? {| inside | outside } {+ @qualid } }
+
+   .. deprecated:: 8.12
+
+      Use the `headconcl:` clause of :cmd:`Search` instead.
 
    Displays the name and type of all hypotheses of the
    selected goal (if any) and theorems of the current context that have the
    form :n:`{? forall {* @binder }, } {* P__i -> } C` where :n:`@one_term`
-   matches a prefix of `C`.  For example, a :n:`@one_term` of `f _ b`
-   matches `f a b`, which is a prefix of `C` when `C` is `f a b c`.
+   matches a subterm of `C` in head position.  For example, a :n:`@one_term` of `f _ b`
+   matches `f a b`, which is a subterm of `C` in head position when `C` is `f a b c`.
 
    See :cmd:`Search` for an explanation of the `inside`/`outside` clauses.
 
    .. example:: :cmd:`SearchHead` examples
 
-      .. coqtop:: reset all
+      .. coqtop:: none reset
+
+         Add Search Blacklist "internal_".
+
+      .. coqtop:: all warn
 
          SearchHead le.
          SearchHead (@eq bool).
@@ -333,13 +393,19 @@ to accessible objects.  (see Section :ref:`invocation-of-tactics`).
    Use the :cmd:`Add` and :cmd:`Remove` commands to update the set of
    blacklisted strings.
 
+.. flag:: Search Output Name Only
+
+   This flag restricts the output of search commands to identifier names;
+   turning it on causes invocations of :cmd:`Search`, :cmd:`SearchHead`,
+   :cmd:`SearchPattern`, :cmd:`SearchRewrite` etc. to omit types from their
+   output, printing only identifiers.
 
 .. _requests-to-the-environment:
 
 Requests to the environment
 -------------------------------
 
-.. cmd:: Print Assumptions @smart_qualid
+.. cmd:: Print Assumptions @reference
 
    Displays all the assumptions (axioms, parameters and
    variables) a theorem or definition depends on.
@@ -347,34 +413,44 @@ Requests to the environment
    The message "Closed under the global context" indicates that the theorem or
    definition has no dependencies.
 
-.. cmd:: Print Opaque Dependencies @smart_qualid
+.. cmd:: Print Opaque Dependencies @reference
 
-   Displays the assumptions and opaque constants that :n:`@smart_qualid` depends on.
+   Displays the assumptions and opaque constants that :n:`@reference` depends on.
 
-.. cmd:: Print Transparent Dependencies @smart_qualid
+.. cmd:: Print Transparent Dependencies @reference
 
-   Displays the assumptions and  transparent constants that :n:`@smart_qualid` depends on.
+   Displays the assumptions and  transparent constants that :n:`@reference` depends on.
 
-.. cmd:: Print All Dependencies @smart_qualid
+.. cmd:: Print All Dependencies @reference
 
-   Displays all the assumptions and constants :n:`@smart_qualid` depends on.
+   Displays all the assumptions and constants :n:`@reference` depends on.
 
-.. cmd:: Locate @smart_qualid
+.. cmd:: Locate @reference
+
+   .. insertprodn reference reference
+
+   .. prodn::
+      reference ::= @qualid
+      | @string {? % @scope_key }
 
    Displays the full name of objects from |Coq|'s various qualified namespaces such as terms,
-   modules and Ltac.  It also displays notation definitions.
+   modules and Ltac, thereby showing the module they are defined in.  It also displays notation definitions.
 
-   If the argument is:
+   :n:`@qualid`
+     refers to object names that end with :n:`@qualid`.
 
-   * :n:`@qualid` - displays the full name of objects that
-     end with :n:`@qualid`, thereby showing the module they are defined in.
-   * :n:`@string {? "%" @ident }` - displays the definition of a notation.  :n:`@string`
+   :n:`@string {? % @scope_key }`
+     refers to definitions of notations.  :n:`@string`
      can be a single token in the notation such as "`->`" or a pattern that matches the
      notation.  See :ref:`locating-notations`.
 
+     :n:`% @scope_key`, if present, limits the reference to the scope bound to the delimiting
+     key :n:`@scope_key`, such as, for example, :n:`%nat`.  (see Section
+     :ref:`LocalInterpretationRulesForNotations`)
+
    .. todo somewhere we should list all the qualified namespaces
 
-.. cmd:: Locate Term @smart_qualid
+.. cmd:: Locate Term @reference
 
    Like :cmd:`Locate`, but limits the search to terms
 
@@ -504,13 +580,13 @@ file is a particular case of a module called a *library file*.
    several files match, one of them is picked in an unspecified fashion.
    Therefore, library authors should use a unique name for each module and
    users are encouraged to use fully-qualified names
-   or the :cmd:`From ... Require` command to load files.
+   or the :cmd:`From … Require` command to load files.
 
 
    .. todo common user error on dirpaths see https://github.com/coq/coq/pull/11961#discussion_r402852390
 
    .. cmd:: From @dirpath Require {? {| Import | Export } } {+ @qualid }
-      :name: From ... Require
+      :name: From … Require
 
       Works like :cmd:`Require`, but loads, for each :n:`@qualid`,
       the library whose fully-qualified name matches :n:`@dirpath.{* @ident . }@qualid`
@@ -543,7 +619,7 @@ file is a particular case of a module called a *library file*.
    .. exn:: The file @ident.vo contains library @qualid__1 and not library @qualid__2.
 
       The library :n:`@qualid__2` is indirectly required by a :cmd:`Require` or
-      :cmd:`From ... Require` command.  The loadpath maps :n:`@qualid__2` to :n:`@ident.vo`,
+      :cmd:`From … Require` command.  The loadpath maps :n:`@qualid__2` to :n:`@ident.vo`,
       which was compiled using a loadpath that bound it to :n:`@qualid__1`.  Usually
       the appropriate solution is to recompile :n:`@ident.v` using the correct loadpath.
       See :ref:`libraries-and-filesystem`.
@@ -655,10 +731,10 @@ the toplevel, and using them in source files is discouraged.
    (cf. :cmd:`Declare ML Module`).
 
 
-.. _backtracking:
+.. _backtracking_subsection:
 
 Backtracking
-----------------
+------------
 
 The backtracking commands described in this section can only be used
 interactively, they cannot be part of a vernacular file loaded via
@@ -814,13 +890,6 @@ Controlling display
    interpreted from left to right, so in case of an overlap, the flags on the
    right have higher priority, meaning that `A,-A` is equivalent to `-A`.
 
-.. flag:: Search Output Name Only
-
-   This flag restricts the output of search commands to identifier names;
-   turning it on causes invocations of :cmd:`Search`, :cmd:`SearchHead`,
-   :cmd:`SearchPattern`, :cmd:`SearchRewrite` etc. to omit types from their
-   output, printing only identifiers.
-
 .. opt:: Printing Width @num
    :name: Printing Width
 
@@ -855,6 +924,36 @@ Controlling display
    after each tactic.  The information is used by the Prooftree tool in Proof
    General. (https://askra.de/software/prooftree)
 
+.. extracted from Gallina extensions chapter
+
+.. _printing_constructions_full:
+
+Printing constructions in full
+------------------------------
+
+.. flag:: Printing All
+
+   Coercions, implicit arguments, the type of pattern matching, but also
+   notations (see :ref:`syntax-extensions-and-notation-scopes`) can obfuscate the behavior of some
+   tactics (typically the tactics applying to occurrences of subterms are
+   sensitive to the implicit arguments). Turning this flag on
+   deactivates all high-level printing features such as coercions,
+   implicit arguments, returned type of pattern matching, notations and
+   various syntactic sugar for pattern matching or record projections.
+   Otherwise said, :flag:`Printing All` includes the effects of the flags
+   :flag:`Printing Implicit`, :flag:`Printing Coercions`, :flag:`Printing Synth`,
+   :flag:`Printing Projections`, and :flag:`Printing Notations`. To reactivate
+   the high-level printing features, use the command ``Unset Printing All``.
+
+   .. note:: In some cases, setting :flag:`Printing All` may display terms
+      that are so big they become very hard to read.  One technique to work around
+      this is use :cmd:`Undelimit Scope` and/or :cmd:`Close Scope` to turn off the
+      printing of notations bound to particular scope(s).  This can be useful when
+      notations in a given scope are getting in the way of understanding
+      a goal, but turning off all notations with :flag:`Printing All` would make
+      the goal unreadable.
+
+      .. see a contrived example here: https://github.com/coq/coq/pull/11718#discussion_r415481854
 
 .. _vernac-controlling-the-reduction-strategies:
 
@@ -874,7 +973,7 @@ as numbers, and for reflection-based tactics. The commands to fine-
 tune the reduction strategies and the lazy conversion algorithm are
 described first.
 
-.. cmd:: Opaque {+ @smart_qualid }
+.. cmd:: Opaque {+ @reference }
 
    This command accepts the :attr:`global` attribute.  By default, the scope
    of :cmd:`Opaque` is limited to the current section or module.
@@ -883,7 +982,7 @@ described first.
    defined by :cmd:`Definition` or :cmd:`Let` (with an explicit body), or by a command
    assimilated to a definition such as :cmd:`Fixpoint`, :cmd:`Program Definition`, etc,
    or by a proof ended by :cmd:`Defined`. The command tells not to unfold the
-   constants in the :n:`@smart_qualid` sequence in tactics using δ-conversion (unfolding
+   constants in the :n:`@reference` sequence in tactics using δ-conversion (unfolding
    a constant is replacing it by its definition).
 
    :cmd:`Opaque` has also an effect on the conversion algorithm of |Coq|, telling
@@ -896,7 +995,7 @@ described first.
       Sections :ref:`performingcomputations`, :ref:`tactics-automating`,
       :ref:`proof-editing-mode`
 
-.. cmd:: Transparent {+ @smart_qualid }
+.. cmd:: Transparent {+ @reference }
 
    This command accepts the :attr:`global` attribute.  By default, the scope
    of :cmd:`Transparent` is limited to the current section or module.
@@ -923,15 +1022,17 @@ described first.
 
 .. _vernac-strategy:
 
-.. cmd:: Strategy {+ @strategy_level [ {+ @smart_qualid } ] }
+.. cmd:: Strategy {+ @strategy_level [ {+ @reference } ] }
 
-   .. insertprodn strategy_level strategy_level
+   .. insertprodn strategy_level strategy_level_or_var
 
    .. prodn::
       strategy_level ::= opaque
       | @int
       | expand
       | transparent
+      strategy_level_or_var ::= @strategy_level
+      | @ident
 
    This command accepts the :attr:`local` attribute, which limits its effect
    to the current section or module, in which case the section and module
@@ -940,7 +1041,7 @@ described first.
    This command generalizes the behavior of the :cmd:`Opaque` and :cmd:`Transparent`
    commands. It is used to fine-tune the strategy for unfolding
    constants, both at the tactic level and at the kernel level. This
-   command associates a :n:`@strategy_level` with the qualified names in the :n:`@smart_qualid`
+   command associates a :n:`@strategy_level` with the qualified names in the :n:`@reference`
    sequence. Whenever two
    expressions with two distinct head constants are compared (for
    instance, this comparison can be triggered by a type cast), the one
@@ -961,10 +1062,10 @@ described first.
       like −∞)
     + ``transparent`` : Equivalent to level 0
 
-.. cmd:: Print Strategy @smart_qualid
+.. cmd:: Print Strategy @reference
 
-   This command prints the strategy currently associated with :n:`@smart_qualid`. It
-   fails if :n:`@smart_qualid` is not an unfoldable reference, that is, neither a
+   This command prints the strategy currently associated with :n:`@reference`. It
+   fails if :n:`@reference` is not an unfoldable reference, that is, neither a
    variable nor a constant.
 
    .. exn:: The reference is not unfoldable.
@@ -1075,6 +1176,8 @@ Controlling Typing Flags
 
    Print the status of the three typing flags: guard checking, positivity checking
    and universe checking.
+
+See also :flag:`Cumulative StrictProp` in the |SProp| chapter.
 
 .. example::
 

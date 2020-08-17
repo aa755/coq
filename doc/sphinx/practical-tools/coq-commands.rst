@@ -81,8 +81,7 @@ loading of the resource file with the option ``-q``.
 By environment variables
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Load path can be specified to the |Coq| system by setting up ``$COQPATH``
-environment variable. It is a list of directories separated by
+``$COQPATH`` can be used to specify the load path. It is a list of directories separated by
 ``:`` (``;`` on Windows). |Coq| will also honor ``$XDG_DATA_HOME`` and
 ``$XDG_DATA_DIRS`` (see Section :ref:`libraries-and-filesystem`).
 
@@ -92,7 +91,7 @@ not set, they look for the commands in the executable path.
 
 .. _COQ_COLORS:
 
-The ``$COQ_COLORS`` environment variable can be used to specify the set
+``$COQ_COLORS`` can be used to specify the set
 of colors used by ``coqtop`` to highlight its output. It uses the same
 syntax as the ``$LS_COLORS`` variable from GNU’s ls, that is, a colon-separated
 list of assignments of the form :n:`name={*; attr}` where
@@ -108,6 +107,22 @@ sets the highlights for added text in diffs to underlined (the 4) with a backgro
 color (0, 0, 240) and for removed text in diffs to a red background.
 Note that if you specify ``COQ_COLORS``, the predefined attributes are ignored.
 
+.. _OCAMLRUNPARAM:
+
+``$OCAMLRUNPARAM``, described
+`here <https://caml.inria.fr/pub/docs/manual-ocaml/runtime.html#s:ocamlrun-options>`_,
+can be used to specify certain runtime and memory usage parameters.  In most cases,
+experimenting with these settings will likely not cause a significant performance difference
+and should be harmless.
+
+If the variable is not set, |Coq| uses the
+`default values <https://caml.inria.fr/pub/docs/manual-ocaml/libref/Gc.html#TYPEcontrol>`_,
+except that ``space_overhead`` is set to 120 and ``minor_heap_size`` is set to 32Mwords
+(256MB with 64-bit executables or 128MB with 32-bit executables).
+
+.. todo: Using the same text "here" for both of the links in the last 2 paragraphs generates
+   an incorrect warning: coq-commands.rst:4: WARNING: Duplicate explicit target name: "here".
+   The warning doesn't even have the right line number. :-(
 
 .. _command-line-options:
 
@@ -151,7 +166,7 @@ and ``coqtop``, unless stated otherwise:
   while processing options such as -R and -Q. By default, only the
   conventional version control management directories named CVS
   and_darcs are excluded.
-:-nois: Start from an empty state instead of loading the Init.Prelude
+:-nois, -noinit: Start from an empty state instead of loading the `Init.Prelude`
   module.
 :-init-file *file*: Load *file* as the resource file instead of
   loading the default resource file from the standard configuration
@@ -163,32 +178,53 @@ and ``coqtop``, unless stated otherwise:
   |Coq| script from *file.v*. Write its contents to the standard output as
   it is executed.
 :-load-vernac-object *qualid*: Load |Coq| compiled library :n:`@qualid`. This
-  is equivalent to running :cmd:`Require` :n:`qualid`.
+  is equivalent to running :cmd:`Require` :n:`@qualid`.
+
+  .. _interleave-command-line:
+
+  .. note::
+
+     Note that the relative order of this command-line option and its
+     variants (`-rfrom`, `-ri`, `-re`, etc.)  and of the `-set` and
+     `-unset` options matters since the various :cmd:`Require`,
+     :cmd:`Require Import`, :cmd:`Require Export`, :cmd:`Set` and
+     :cmd:`Unset` commands will be executed in the order specified on
+     the command-line.
+
 :-rfrom *dirpath* *qualid*: Load |Coq| compiled library :n:`@qualid`.
-  This is equivalent to running :n:`From` :n:`@dirpath` :cmd:`Require Import` :n:`@qualid`.
+  This is equivalent to running :cmd:`From <From … Require>`
+  :n:`@dirpath` :cmd:`Require <From … Require>` :n:`@qualid`.
+  See the :ref:`note above <interleave-command-line>` regarding the order
+  of command-line options.
 :-ri *qualid*, -require-import *qualid*: Load |Coq| compiled library :n:`@qualid` and import it.
   This is equivalent to running :cmd:`Require Import` :n:`@qualid`.
+  See the :ref:`note above <interleave-command-line>` regarding the order
+  of command-line options.
 :-re *qualid*, -require-export *qualid*: Load |Coq| compiled library :n:`@qualid` and transitively import it.
   This is equivalent to running :cmd:`Require Export` :n:`@qualid`.
-:-rifrom *dirpath* *qualid*, -require-import-from *dirpath* *qualid*: Load |Coq| compiled library :n:`@qualid` and import it.
-  This is equivalent to running :n:`From` :n:`@dirpath` :cmd:`Require Import` :n:`@qualid`.
-:-refrom *dirpath* *qualid*, -require-export-from *dirpath* *qualid*: Load |Coq| compiled library :n:`@qualid` and transitively import it.
-  This is equivalent to running :n:`From` :n:`@dirpath` :cmd:`Require Export` :n:`@qualid`.
+  See the :ref:`note above <interleave-command-line>` regarding the order
+  of command-line options.
+:-rifrom *dirpath* *qualid*, -require-import-from *dirpath* *qualid*:
+  Load |Coq| compiled library :n:`@qualid` and import it.  This is
+  equivalent to running :cmd:`From <From … Require>` :n:`@dirpath`
+  :cmd:`Require Import <From … Require>` :n:`@qualid`.  See the
+  :ref:`note above <interleave-command-line>` regarding the order of
+  command-line options.
+:-refrom *dirpath* *qualid*, -require-export-from *dirpath* *qualid*:
+  Load |Coq| compiled library :n:`@qualid` and transitively import it.
+  This is equivalent to running :cmd:`From <From … Require>`
+  :n:`@dirpath` :cmd:`Require Export <From … Require>` :n:`@qualid`.
+  See the :ref:`note above <interleave-command-line>` regarding the
+  order of command-line options.
 :-batch: Exit just after argument parsing. Available for ``coqtop`` only.
-:-compile *file.v*: Deprecated; use ``coqc`` instead. Compile file *file.v* into *file.vo*. This option
-  implies -batch (exit just after argument parsing). It is available only
-  for `coqtop`, as this behavior is the purpose of ``coqc``.
-:-compile-verbose *file.v*: Deprecated. Use ``coqc -verbose``. Same as -compile but also output the
-  content of *file.v* as it is compiled.
 :-verbose: Output the content of the input file as it is compiled.
-  This option is available for ``coqc`` only; it is the counterpart of
-  -compile-verbose.
+  This option is available for ``coqc`` only.
 :-vos: Indicate |Coq| to skip the processing of opaque proofs
-  (i.e., proofs ending with ``Qed`` or ``Admitted``), output a ``.vos`` files
+  (i.e., proofs ending with :cmd:`Qed` or :cmd:`Admitted`), output a ``.vos`` files
   instead of a ``.vo`` file, and to load ``.vos`` files instead of ``.vo`` files
-  when interpreting ``Require`` commands.
+  when interpreting :cmd:`Require` commands.
 :-vok: Indicate |Coq| to check a file completely, to load ``.vos`` files instead
-  of ``.vo`` files when interpreting ``Require`` commands, and to output an empty
+  of ``.vo`` files when interpreting :cmd:`Require` commands, and to output an empty
   ``.vok`` files upon success instead of writing a ``.vo`` file.
 :-w (all|none|w₁,…,wₙ): Configure the display of warnings. This
   option expects all, none or a comma-separated list of warning names or
@@ -198,7 +234,7 @@ and ``coqtop``, unless stated otherwise:
   the output channel supports ANSI escape sequences.
 :-diffs (on|off|removed): *Coqtop only*.  Controls highlighting of differences
   between proof steps.  ``on`` highlights added tokens, ``removed`` highlights both added and
-  removed tokens.  Requires that ``–color`` is enabled.  (see Section
+  removed tokens.  Requires that ``-color`` is enabled.  (see Section
   :ref:`showing_diffs`).
 :-beautify: Pretty-print each command to *file.beautified* when
   compiling *file.v*, in order to get old-fashioned
@@ -224,17 +260,25 @@ and ``coqtop``, unless stated otherwise:
   changes in the auto-generated name scheme. The options are provided to
   facilitate tracking down problems.
 :-set *string*: Enable flags and set options. *string* should be
-   ``Option Name=value``, the value is interpreted according to the
-   type of the option. For flags ``Option Name`` is equivalent to
-   ``Option Name=true``. For instance ``-set "Universe Polymorphism"``
+   :n:`@setting_name=value`, the value is interpreted according to the
+   type of the option. For flags :n:`@setting_name` is equivalent to
+   :n:`@setting_name=true`. For instance ``-set "Universe Polymorphism"``
    will enable :flag:`Universe Polymorphism`. Note that the quotes are
-   shell syntax, Coq does not see them. Flags are processed after initialization
-   of the document. This includes the `Prelude` if loaded and any libraries loaded
-   through the `-l`, `-lv`, `-r`, `-re`, `-ri`, `rfrom`, `-refrom` and `-rifrom`
-   options.
+   shell syntax, Coq does not see them.
+   See the :ref:`note above <interleave-command-line>` regarding the order
+   of command-line options.
 :-unset *string*: As ``-set`` but used to disable options and flags.
-:-compat *version*: Attempt to maintain some backward-compatibility
-  with a previous version.
+  *string* must be :n:`"@setting_name"`.
+  See the :ref:`note above <interleave-command-line>` regarding the order
+  of command-line options.
+:-compat *version*: Load a file that sets a few options to maintain
+  partial backward-compatibility with a previous version.  This is
+  equivalent to :cmd:`Require Import` `Coq.Compat.CoqXXX` with `XXX`
+  one of the last three released versions (including the current
+  version).  Note that the :ref:`explanations above
+  <interleave-command-line>` regarding the order of command-line
+  options apply, and this could be relevant if you are resetting some
+  of the compatibility options.
 :-dump-glob *file*: Dump references for global names in file *file*
   (to be used by coqdoc, see :ref:`coqdoc`). By default, if *file.v* is being
   compiled, *file.glob* is used.

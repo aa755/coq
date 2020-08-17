@@ -25,9 +25,9 @@ type t
 
 val empty : t
 
-val make : lbound:Univ.Level.t -> UGraph.t -> t
+val make : lbound:UGraph.Bound.t -> UGraph.t -> t
 
-val make_with_initial_binders : lbound:Univ.Level.t -> UGraph.t -> lident list -> t
+val make_with_initial_binders : lbound:UGraph.Bound.t -> UGraph.t -> lident list -> t
 
 val is_empty : t -> bool
 
@@ -90,7 +90,7 @@ val universe_of_name : t -> Id.t -> Univ.Level.t
    the universes in [keep]. The constraints [csts] are adjusted so
    that transitive constraints between remaining universes (those in
    [keep] and those not in [univs]) are preserved. *)
-val restrict_universe_context : lbound:Univ.Level.t -> ContextSet.t -> LSet.t -> ContextSet.t
+val restrict_universe_context : lbound:UGraph.Bound.t -> ContextSet.t -> LSet.t -> ContextSet.t
 
 (** [restrict uctx ctx] restricts the local universes of [uctx] to
    [ctx] extended by local named universes and side effect universes
@@ -109,6 +109,11 @@ val univ_flexible_alg : rigid
 val merge : ?loc:Loc.t -> sideff:bool -> rigid -> t -> Univ.ContextSet.t -> t
 val merge_subst : t -> UnivSubst.universe_opt_subst -> t
 val emit_side_effects : Safe_typing.private_constants -> t -> t
+
+val demote_global_univs : Environ.env -> t -> t
+(** Removes from the uctx_local part of the UState the universes and constraints
+    that are present in the universe graph in the input env (supposedly the
+    global ones *)
 
 val demote_seff_univs : Univ.LSet.t -> t -> t
 (** Mark the universes as not local any more, because they have been

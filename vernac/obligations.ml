@@ -20,7 +20,7 @@ open DeclareObl
 open DeclareObl.Obligation
 open DeclareObl.ProgramDecl
 
-let pperror cmd = CErrors.user_err ~hdr:"Program" cmd
+let pperror ?info cmd = CErrors.user_err ~hdr:"Program" ?info cmd
 let error s = pperror (str s)
 
 let reduce c =
@@ -92,10 +92,16 @@ let get_any_prog () =
   else raise (NoObligations None)
 
 let get_prog_err n =
-  try get_prog n with NoObligations id -> pperror (explain_no_obligations id)
+  try get_prog n
+  with NoObligations id as exn ->
+    let _, info = Exninfo.capture exn in
+    pperror ~info (explain_no_obligations id)
 
 let get_any_prog_err () =
-  try get_any_prog () with NoObligations id -> pperror (explain_no_obligations id)
+  try get_any_prog ()
+  with NoObligations id as exn ->
+    let _, info = Exninfo.capture exn in
+    pperror ~info (explain_no_obligations id)
 
 let all_programs () =
   ProgMap.fold (fun k p l -> p :: l) (get_prg_info_map ()) []
@@ -133,7 +139,7 @@ let solve_by_tac ?loc name evi t poly uctx =
   try
     (* the status is dropped. *)
     let env = Global.env () in
-    let body, types, _, uctx =
+    let body, types, _univs, _, uctx =
       Declare.build_by_tactic env ~uctx ~poly ~typ:evi.evar_concl t in
     Inductiveops.control_only_guard env (Evd.from_ctx uctx) (EConstr.of_constr body);
     Some (body, types, uctx)
@@ -162,13 +168,13 @@ let rec solve_obligation prg num tac =
         ++ str (string_of_list ", " (fun x -> string_of_int (succ x)) remaining));
   in
   let obl = subst_deps_obl obls obl in
-  let scope = DeclareDef.(Global Declare.ImportNeedQualified) in
+  let scope = Declare.(Global Declare.ImportNeedQualified) in
   let kind = kind_of_obligation (snd obl.obl_status) in
   let evd = Evd.from_ctx prg.prg_ctx in
   let evd = Evd.update_sigma_env evd (Global.env ()) in
   let auto n oblset tac = auto_solve_obligations n ~oblset tac in
   let proof_ending = Lemmas.Proof_ending.End_obligation (DeclareObl.{name = prg.prg_name; num; auto}) in
-  let hook = DeclareDef.Hook.make (DeclareObl.obligation_hook prg obl num auto) in
+  let hook = Declare.Hook.make (DeclareObl.obligation_hook prg obl num auto) in
   let info = Lemmas.Info.make ~hook ~proof_ending ~scope ~kind () in
   let poly = prg.prg_poly in
   let lemma = Lemmas.start_lemma ~name:obl.obl_name ~poly ~info evd (EConstr.of_constr obl.obl_type) in
@@ -309,7 +315,7 @@ let show_term n =
             ++ Printer.pr_constr_env env sigma prg.prg_body)
 
 let add_definition ~name ?term t ~uctx ?(udecl=UState.default_univ_decl)
-                   ?(impargs=[]) ~poly ?(scope=DeclareDef.Global Declare.ImportDefaultBehavior) ?(kind=Decls.Definition) ?tactic
+                   ?(impargs=[]) ~poly ?(scope=Declare.Global Declare.ImportDefaultBehavior) ?(kind=Decls.Definition) ?tactic
     ?(reduce=reduce) ?hook ?(opaque = false) obls =
   let info = Id.print name ++ str " has type-checked" in
   let prg = ProgramDecl.make ~opaque name ~udecl term t ~uctx [] None [] obls ~impargs ~poly ~scope ~kind reduce ?hook in
@@ -328,11 +334,11 @@ let add_definition ~name ?term t ~uctx ?(udecl=UState.default_univ_decl)
         | _ -> res)
 
 let add_mutual_definitions l ~uctx ?(udecl=UState.default_univ_decl) ?tactic
-                           ~poly ?(scope=DeclareDef.Global Declare.ImportDefaultBehavior) ?(kind=Decls.Definition) ?(reduce=reduce)
+                           ~poly ?(scope=Declare.Global Declare.ImportDefaultBehavior) ?(kind=Decls.Definition) ?(reduce=reduce)
     ?hook ?(opaque = false) notations fixkind =
-  let deps = List.map (fun ({ DeclareDef.Recthm.name; _ }, _, _) -> name) l in
+  let deps = List.map (fun ({ Declare.Recthm.name; _ }, _, _) -> name) l in
     List.iter
-    (fun ({ DeclareDef.Recthm.name; typ; impargs; _ }, b, obls) ->
+    (fun ({ Declare.Recthm.name; typ; impargs; _ }, b, obls) ->
      let prg = ProgramDecl.make ~opaque name ~udecl (Some b) typ ~uctx deps (Some fixkind)
        notations obls ~impargs ~poly ~scope ~kind reduce ?hook
      in progmap_add name (CEphemeron.create prg)) l;

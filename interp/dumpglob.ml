@@ -207,7 +207,7 @@ let cook_notation (from,df) sc =
   done;
   let df = Bytes.sub_string ntn 0 !j in
   let df_sc = match sc with Some sc -> ":" ^ sc ^ ":" ^ df | _ -> "::" ^ df in
-  let from_df_sc = match from with Constrexpr.InCustomEntryLevel (from,_) -> ":" ^ from ^ df_sc | Constrexpr.InConstrEntrySomeLevel -> ":" ^ df_sc in
+  let from_df_sc = match from with Constrexpr.InCustomEntry from -> ":" ^ from ^ df_sc | Constrexpr.InConstrEntry -> ":" ^ df_sc in
   from_df_sc
 
 let dump_notation_location posl df (((path,secpath),_),sc) =
@@ -246,8 +246,6 @@ let add_glob_kn ?loc kn =
     let lib_dp = Lib.dp_of_mp (mp_of_kn kn) in
     add_glob_gen ?loc sp lib_dp "syndef"
 
-let dump_binding ?loc id = ()
-
 let dump_def ?loc ty secpath id = Option.iter (fun loc ->
   if !glob_output = Feedback then
     Feedback.feedback (Feedback.GlobDef (loc, id, secpath, ty))
@@ -275,3 +273,6 @@ let dump_notation (loc,(df,_)) sc sec = Option.iter (fun loc ->
   let location = (Loc.make_loc (i, i+1)) in
   dump_def ~loc:location "not" (Names.DirPath.to_string (Lib.current_dirpath sec)) (cook_notation df sc)
   ) loc
+
+let dump_binding ?loc uid =
+  dump_def ?loc "binder" "<>" uid

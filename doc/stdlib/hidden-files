@@ -44,6 +44,7 @@ theories/micromega/Refl.v
 theories/micromega/RingMicromega.v
 theories/micromega/Tauto.v
 theories/micromega/VarMap.v
+theories/micromega/ZArith_hints.v
 theories/micromega/ZCoeff.v
 theories/micromega/ZMicromega.v
 theories/micromega/ZifyInst.v
@@ -52,6 +53,7 @@ theories/micromega/ZifyComparison.v
 theories/micromega/ZifyClasses.v
 theories/micromega/ZifyPow.v
 theories/micromega/Zify.v
+theories/nsatz/NsatzTactic.v
 theories/nsatz/Nsatz.v
 theories/omega/Omega.v
 theories/omega/OmegaLemmas.v
@@ -89,3 +91,4 @@ theories/setoid_ring/Rings_Z.v
 theories/setoid_ring/ZArithRing.v
 theories/ssr/ssrunder.v
 theories/ssr/ssrsetoid.v
+theories/ssrsearch/ssrsearch.vo

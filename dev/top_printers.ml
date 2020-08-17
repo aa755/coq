@@ -239,7 +239,9 @@ let ppnamedcontextval e =
 let ppaucontext auctx =
   let nas = AUContext.names auctx in
   let prlev l = match Level.var_index l with
-    | Some n -> Name.print nas.(n)
+    | Some n -> (match nas.(n) with
+        | Anonymous -> prlev l
+        | Name id -> Id.print id)
     | None -> prlev l
   in
   pp (pr_universe_context prlev (AUContext.repr auctx))
@@ -287,7 +289,7 @@ let constr_display csr =
       "LetIn("^(name_display na)^","^(term_display b)^","
       ^(term_display t)^","^(term_display c)^")"
   | App (c,l) -> "App("^(term_display c)^","^(array_display l)^")\n"
-  | Evar (e,l) -> "Evar("^(Pp.string_of_ppcmds (Evar.print e))^","^(array_display l)^")"
+  | Evar (e,l) -> "Evar("^(Pp.string_of_ppcmds (Evar.print e))^","^(array_display (Array.of_list l))^")"
   | Const (c,u) -> "Const("^(Constant.to_string c)^","^(universes_display u)^")"
   | Ind ((sp,i),u) ->
       "MutInd("^(MutInd.to_string sp)^","^(string_of_int i)^","^(universes_display u)^")"
@@ -383,7 +385,7 @@ let print_pure_constr csr =
       Array.iter (fun x -> print_space (); box_display x) l;
       print_string ")"
   | Evar (e,l) -> print_string "Evar#"; print_int (Evar.repr e); print_string "{";
-      Array.iter (fun x -> print_space (); box_display x) l;
+      List.iter (fun x -> print_space (); box_display x) l;
       print_string"}"
   | Const (c,u) -> print_string "Cons(";
       sp_con_display c;

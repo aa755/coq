@@ -337,6 +337,7 @@ val split                : constr bindings -> unit Proofview.tactic
 val left_with_bindings  : evars_flag -> constr bindings -> unit Proofview.tactic
 val right_with_bindings : evars_flag -> constr bindings -> unit Proofview.tactic
 val split_with_bindings : evars_flag -> constr bindings list -> unit Proofview.tactic
+val split_with_delayed_bindings : evars_flag -> constr bindings delayed_open list -> unit Proofview.tactic
 
 val simplest_left        : unit Proofview.tactic
 val simplest_right       : unit Proofview.tactic
@@ -434,6 +435,12 @@ val declare_intro_decomp_eq :
   ((int -> unit Proofview.tactic) -> Coqlib.coq_eq_data * types *
    (types * constr * constr) ->
    constr * types -> unit Proofview.tactic) -> unit
+
+(** Tactic analogous to the [Strategy] vernacular, but only applied
+   locally to the tactic argument *)
+val with_set_strategy :
+  (Conv_oracle.level * Names.GlobRef.t list) list ->
+  'a Proofview.tactic -> 'a Proofview.tactic
 
 (** {6 Simple form of basic tactics. } *)
 

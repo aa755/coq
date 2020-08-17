@@ -241,7 +241,10 @@ let v_cst_def =
     [|[|Opt Int|]; [|v_cstr_subst|]; [|v_opaque|]; [|v_primitive|]|]
 
 let v_typing_flags =
-  v_tuple "typing_flags" [|v_bool; v_bool; v_bool; v_oracle; v_bool; v_bool; v_bool; v_bool|]
+  v_tuple "typing_flags"
+    [|v_bool; v_bool; v_bool;
+      v_oracle; v_bool; v_bool;
+      v_bool; v_bool; v_bool|]
 
 let v_univs = v_sum "universes" 0 [|[|v_context_set|]; [|v_abs_context|]|]
 
@@ -356,17 +359,17 @@ and v_impl =
 and v_noimpl = v_unit
 and v_module =
   Tuple ("module_body",
-         [|v_mp;v_impl;v_sign;Opt v_mexpr;v_context_set;v_resolver;v_retroknowledge|])
+         [|v_mp;v_impl;v_sign;Opt v_mexpr;v_resolver;v_retroknowledge|])
 and v_modtype =
   Tuple ("module_type_body",
-         [|v_mp;v_noimpl;v_sign;Opt v_mexpr;v_context_set;v_resolver;v_unit|])
+         [|v_mp;v_noimpl;v_sign;Opt v_mexpr;v_resolver;v_unit|])
 
 (** kernel/safe_typing *)
 
 let v_vodigest = Sum ("module_impl",0, [| [|String|]; [|String;String|] |])
 let v_deps = Array (v_tuple "dep" [|v_dp;v_vodigest|])
 let v_compiled_lib =
-  v_tuple "compiled" [|v_dp;v_module;v_deps;v_engagement;Any|]
+  v_tuple "compiled" [|v_dp;v_module;v_context_set;v_deps;v_engagement;Any|]
 
 (** Library objects *)
 
@@ -432,7 +435,7 @@ let v_stm_seg = v_pair v_tasks v_counters
 (** Toplevel structures in a vo (see Cic.mli) *)
 
 let v_libsum =
-  Tuple ("summary", [|v_dp;v_deps|])
+  Tuple ("summary", [|v_dp;v_deps;String|])
 
 let v_lib =
   Tuple ("library",[|v_compiled_lib;v_libraryobjs|])

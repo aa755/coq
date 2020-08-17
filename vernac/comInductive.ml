@@ -60,23 +60,28 @@ type structured_one_inductive_expr = {
   ind_lc : (Id.t * constr_expr) list
 }
 
+exception Same of Id.t
+
 let check_all_names_different indl =
+  let rec elements = function
+  | [] -> Id.Set.empty
+  | id :: l ->
+    let s = elements l in
+    if Id.Set.mem id s then raise (Same id) else Id.Set.add id s
+  in
   let ind_names = List.map (fun ind -> ind.ind_name) indl in
   let cstr_names = List.map_append (fun ind -> List.map fst ind.ind_lc) indl in
-  let l = List.duplicates Id.equal ind_names in
-  let () = match l with
-  | [] -> ()
-  | t :: _ -> raise (InductiveError (SameNamesTypes t))
+  let ind_names = match elements ind_names with
+  | s -> s
+  | exception (Same t) -> raise (InductiveError (SameNamesTypes t))
   in
-  let l = List.duplicates Id.equal cstr_names in
-  let () = match l with
-  | [] -> ()
-  | c :: _ -> raise (InductiveError (SameNamesConstructors (List.hd l)))
+  let cstr_names = match elements cstr_names with
+  | s -> s
+  | exception (Same c) -> raise (InductiveError (SameNamesConstructors c))
   in
-  let l = List.intersect Id.equal ind_names cstr_names in
-  match l with
-  | [] -> ()
-  | _ -> raise (InductiveError (SameNamesOverlap l))
+  let l = Id.Set.inter ind_names cstr_names in
+  if not (Id.Set.is_empty l) then
+    raise (InductiveError (SameNamesOverlap (Id.Set.elements l)))
 
 (** Make the arity conclusion flexible to avoid generating an upper bound universe now,
     only if the universe does not appear anywhere else.
@@ -117,7 +122,7 @@ let intern_ind_arity env sigma ind =
 let pretype_ind_arity env sigma (loc, c, impls, pseudo_poly) =
   let sigma,t = understand_tcc env sigma ~expected_type:IsType c in
   match Reductionops.sort_of_arity env sigma t with
-  | exception Invalid_argument _ ->
+  | exception Reduction.NotArity ->
     user_err ?loc (str "Not an arity")
   | s ->
     let concl = match pseudo_poly with
@@ -475,7 +480,7 @@ let interp_mutual_inductive_gen env0 ~template udecl (uparamsl,paramsl,indl) not
   let indnames = List.map (fun ind -> ind.ind_name) indl in
 
   (* In case of template polymorphism, we need to compute more constraints *)
-  let env0 = if poly then env0 else Environ.set_universes_lbound env0 Univ.Level.prop in
+  let env0 = if poly then env0 else Environ.set_universes_lbound env0 UGraph.Bound.Prop in
 
   let sigma, env_params, (ctx_params, env_uparams, ctx_uparams, params, userimpls, useruimpls, impls, udecl) =
     interp_params env0 udecl uparamsl paramsl

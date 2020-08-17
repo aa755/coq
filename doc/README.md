@@ -28,20 +28,21 @@ Dependencies
 
 To produce the complete documentation in HTML, you will need Coq dependencies
 listed in [`INSTALL.md`](../INSTALL.md). Additionally, the Sphinx-based
-reference manual requires Python 3, and the following Python packages:
+reference manual requires Python 3, and the following Python packages
+(note the version constraints on Sphinx):
 
-  - sphinx >= 1.8.0
-  - sphinx_rtd_theme >= 0.2.5b2
+  - sphinx >= 2.3.1 & < 3.0.0
+  - sphinx_rtd_theme >= 0.4.3
   - beautifulsoup4 >= 4.0.6
   - antlr4-python3-runtime >= 4.7.1
   - pexpect >= 4.2.1
-  - sphinxcontrib-bibtex >= 0.4.0
+  - sphinxcontrib-bibtex >= 0.4.2
 
 To install them, you should first install pip and setuptools (for instance,
 with `apt install python3-pip python3-setuptools` on Debian / Ubuntu) then run:
 
-    pip3 install sphinx sphinx_rtd_theme beautifulsoup4 antlr4-python3-runtime \
-                 pexpect sphinxcontrib-bibtex
+    pip3 install sphinx==2.3.1 sphinx_rtd_theme beautifulsoup4 \
+                 antlr4-python3-runtime==4.7.1 pexpect sphinxcontrib-bibtex
 
 Nix users should get the correct development environment to build the
 HTML documentation from Coq's [`default.nix`](../default.nix) (note this
@@ -58,7 +59,6 @@ additional tools are required:
   - makeindex
   - xelatex
   - latexmk
-  - xindy
 
 All of them are part of the TexLive distribution. E.g. on Debian / Ubuntu,
 install them with:
@@ -68,7 +68,7 @@ install them with:
 Or if you want to use less disk space:
 
     apt install texlive-latex-extra texlive-fonts-recommended texlive-xetex \
-                latexmk xindy
+                latexmk fonts-freefont-otf
 
 Compilation
 -----------

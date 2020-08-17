@@ -135,7 +135,6 @@ val set_check_positive : bool -> safe_transformer0
 val set_check_universes : bool -> safe_transformer0
 val set_VM : bool -> safe_transformer0
 val set_native_compiler : bool -> safe_transformer0
-val make_sprop_cumulative : safe_transformer0
 val set_allow_sprop : bool -> safe_transformer0
 
 val check_engagement : Environ.env -> Declarations.set_predicativity -> unit
@@ -195,6 +194,7 @@ type compiled_library
 type native_library = Nativecode.global list
 
 val module_of_library : compiled_library -> Declarations.module_body
+val univs_of_library : compiled_library -> Univ.ContextSet.t
 
 val start_library : DirPath.t -> ModPath.t safe_transformer
 

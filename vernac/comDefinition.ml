@@ -29,14 +29,17 @@ let warn_implicits_in_term =
 
 let check_imps ~impsty ~impsbody =
   let rec aux impsty impsbody =
-  match impsty, impsbody with
-  | a1 :: impsty, a2 :: impsbody ->
-    (match a1.CAst.v, a2.CAst.v with
-    | None , None -> aux impsty impsbody
-    | Some _ , Some _ -> aux impsty impsbody
-    | _, _ -> warn_implicits_in_term ?loc:a2.CAst.loc ())
-  | _ :: _, [] | [], _ :: _ -> (* Information only on one side *) ()
-  | [], [] -> () in
+    match impsty, impsbody with
+    | a1 :: impsty, a2 :: impsbody ->
+      let () = match a1.CAst.v, a2.CAst.v with
+        | None , None | Some _, None -> ()
+        | Some (_,b1) , Some (_,b2) ->
+          if not ((b1:bool) = b2) then warn_implicits_in_term ?loc:a2.CAst.loc ()
+        | None, Some _ -> warn_implicits_in_term ?loc:a2.CAst.loc ()
+      in
+      aux impsty impsbody
+    | _ :: _, [] | [], _ :: _ -> (* Information only on one side *) ()
+    | [], [] -> () in
   aux impsty impsbody
 
 let protect_pattern_in_binder bl c ctypopt =
@@ -117,7 +120,7 @@ let do_definition ?hook ~name ~scope ~poly ~kind udecl bl red_option c ctypopt =
   in
   let kind = Decls.IsDefinition kind in
   let _ : Names.GlobRef.t =
-    DeclareDef.declare_definition ~name ~scope ~kind ?hook ~impargs
+    Declare.declare_definition ~name ~scope ~kind ?hook ~impargs
       ~opaque:false ~poly evd ~udecl ~types ~body
   in ()
 
@@ -126,7 +129,7 @@ let do_definition_program ?hook ~name ~scope ~poly ~kind udecl bl red_option c c
   let (body, types), evd, udecl, impargs =
     interp_definition ~program_mode udecl bl ~poly red_option c ctypopt
   in
-  let term, ty, uctx, obls = DeclareDef.prepare_obligation ~name ~poly ~body ~types ~udecl evd in
+  let term, ty, uctx, obls = Declare.prepare_obligation ~name ~poly ~body ~types ~udecl evd in
   let _ : DeclareObl.progress =
     Obligations.add_definition
       ~name ~term ty ~uctx ~udecl ~impargs ~scope ~poly ~kind ?hook obls

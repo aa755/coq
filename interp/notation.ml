@@ -56,9 +56,9 @@ let notation_with_optional_scope_eq inscope1 inscope2 = match (inscope1,inscope2
  | (LastLonelyNotation | NotationInScope _), _ -> false
 
 let notation_eq (from1,ntn1) (from2,ntn2) =
-  notation_entry_level_eq from1 from2 && String.equal ntn1 ntn2
+  notation_entry_eq from1 from2 && String.equal ntn1 ntn2
 
-let pr_notation (from,ntn) = qstring ntn ++ match from with InConstrEntrySomeLevel -> mt () | InCustomEntryLevel (s,n) -> str " in custom " ++ str s
+let pr_notation (from,ntn) = qstring ntn ++ match from with InConstrEntry -> mt () | InCustomEntry s -> str " in custom " ++ str s
 
 module NotationOrd =
   struct
@@ -125,13 +125,14 @@ let declare_scope scope =
   with Not_found ->
     scope_map := String.Map.add scope empty_scope !scope_map
 
-let error_unknown_scope sc =
-  user_err ~hdr:"Notation"
+let error_unknown_scope ~info sc =
+  user_err ~hdr:"Notation" ~info
     (str "Scope " ++ str sc ++ str " is not declared.")
 
 let find_scope ?(tolerant=false) scope =
   try String.Map.find scope !scope_map
-  with Not_found ->
+  with Not_found as exn ->
+    let _, info = Exninfo.capture exn in
     if tolerant then
       (* tolerant mode to be turn off after deprecation phase *)
       begin
@@ -140,7 +141,7 @@ let find_scope ?(tolerant=false) scope =
         empty_scope
       end
     else
-      error_unknown_scope scope
+      error_unknown_scope ~info scope
 
 let check_scope ?(tolerant=false) scope =
   let _ = find_scope ~tolerant scope in ()
@@ -158,7 +159,9 @@ let normalize_scope sc =
     try
       let sc = String.Map.find sc !delimiters_map in
       let _ = String.Map.find sc !scope_map in sc
-    with Not_found -> error_unknown_scope sc
+    with Not_found as exn ->
+      let _, info = Exninfo.capture exn in
+      error_unknown_scope ~info sc
 
 (**********************************************************************)
 (* The global stack of scopes                                         *)
@@ -257,8 +260,10 @@ let remove_delimiters scope =
        try
          let _ = ignore (String.Map.find key !delimiters_map) in
          delimiters_map := String.Map.remove key !delimiters_map
-       with Not_found ->
-         assert false (* A delimiter for scope [scope] should exist *)
+       with Not_found as exn ->
+         let _, info = Exninfo.capture exn in
+         (* XXX info *)
+         CErrors.anomaly ~info (str "A delimiter for scope [scope] should exist")
 
 let find_delimiters_scope ?loc key =
   try String.Map.find key !delimiters_map
@@ -288,7 +293,12 @@ let key_compare k1 k2 = match k1, k2 with
 module KeyOrd = struct type t = key let compare = key_compare end
 module KeyMap = Map.Make(KeyOrd)
 
-type notation_rule = interp_rule * interpretation * int option
+type notation_applicative_status =
+  | AppBoundedNotation of int
+  | AppUnboundedNotation
+  | NotAppNotation
+
+type notation_rule = interp_rule * interpretation * notation_applicative_status
 
 let keymap_add key interp map =
   let old = try KeyMap.find key map with Not_found -> [] in
@@ -324,13 +334,41 @@ let cases_pattern_key c = match DAst.get c with
   | _ -> Oth
 
 let notation_constr_key = function (* Rem: NApp(NRef ref,[]) stands for @ref *)
-  | NApp (NRef ref,args) -> RefKey(canonical_gr ref), Some (List.length args)
+  | NApp (NRef ref,args) -> RefKey(canonical_gr ref), AppBoundedNotation (List.length args)
   | NList (_,_,NApp (NRef ref,args),_,_)
   | NBinderList (_,_,NApp (NRef ref,args),_,_) ->
-      RefKey (canonical_gr ref), Some (List.length args)
-  | NRef ref -> RefKey(canonical_gr ref), None
-  | NApp (_,args) -> Oth, Some (List.length args)
-  | _ -> Oth, None
+      RefKey (canonical_gr ref), AppBoundedNotation (List.length args)
+  | NRef ref -> RefKey(canonical_gr ref), NotAppNotation
+  | NApp (_,args) -> Oth, AppBoundedNotation (List.length args)
+  | NList (_,_,NApp (NVar x,_),_,_) when x = Notation_ops.ldots_var -> Oth, AppUnboundedNotation
+  | _ -> Oth, NotAppNotation
+
+(** Dealing with precedences *)
+
+type level = notation_entry * entry_level * entry_relative_level list
+  (* first argument is InCustomEntry s for custom entries *)
+
+let entry_relative_level_eq t1 t2 = match t1, t2 with
+| LevelLt n1, LevelLt n2 -> Int.equal n1 n2
+| LevelLe n1, LevelLe n2 -> Int.equal n1 n2
+| LevelSome, LevelSome -> true
+| (LevelLt _ | LevelLe _ | LevelSome), _ -> false
+
+let level_eq (s1, l1, t1) (s2, l2, t2) =
+  notation_entry_eq s1 s2 && Int.equal l1 l2 && List.equal entry_relative_level_eq t1 t2
+
+let notation_level_map = Summary.ref ~name:"notation_level_map" NotationMap.empty
+
+let declare_notation_level ntn level =
+  try
+    let _ = NotationMap.find ntn !notation_level_map in
+    anomaly (str "Notation " ++ pr_notation ntn ++ str " is already assigned a level.")
+  with Not_found ->
+  notation_level_map := NotationMap.add ntn level !notation_level_map
+
+let level_of_notation ntn =
+  NotationMap.find ntn !notation_level_map
+
 
 (**********************************************************************)
 (* Interpreting numbers (not in summary because functional objects)   *)
@@ -382,7 +420,7 @@ module InnerPrimToken = struct
     | _ -> false
 
   let mkNumeral n =
-    Numeral (NumTok.Signed.of_bigint n)
+    Numeral (NumTok.Signed.of_bigint CDec n)
 
   let mkString = function
     | None -> None
@@ -423,23 +461,32 @@ type numnot_option =
   | Abstract of NumTok.UnsignedNat.t
 
 type int_ty =
-  { uint : Names.inductive;
+  { dec_uint : Names.inductive;
+    dec_int : Names.inductive;
+    hex_uint : Names.inductive;
+    hex_int : Names.inductive;
+    uint : Names.inductive;
     int : Names.inductive }
 
 type z_pos_ty =
   { z_ty : Names.inductive;
     pos_ty : Names.inductive }
 
-type decimal_ty =
+type numeral_ty =
   { int : int_ty;
-    decimal : Names.inductive }
+    decimal : Names.inductive;
+    hexadecimal : Names.inductive;
+    numeral : Names.inductive }
 
 type target_kind =
-  | Int of int_ty (* Coq.Init.Decimal.int + uint *)
-  | UInt of Names.inductive (* Coq.Init.Decimal.uint *)
+  | Int of int_ty (* Coq.Init.Numeral.int + uint *)
+  | UInt of int_ty (* Coq.Init.Numeral.uint *)
   | Z of z_pos_ty (* Coq.Numbers.BinNums.Z and positive *)
   | Int63 (* Coq.Numbers.Cyclic.Int63.Int63.int *)
-  | Decimal of decimal_ty (* Coq.Init.Decimal.decimal + uint + int *)
+  | Numeral of numeral_ty (* Coq.Init.Numeral.numeral + uint + int *)
+  | DecimalInt of int_ty (* Coq.Init.Decimal.int + uint (deprecated) *)
+  | DecimalUInt of int_ty (* Coq.Init.Decimal.uint (deprecated) *)
+  | Decimal of numeral_ty (* Coq.Init.Decimal.Decimal + uint + int (deprecated) *)
 
 type string_target_kind =
   | ListByte
@@ -601,17 +648,23 @@ let warn_abstract_large_num =
 (** Decimal.Nil has index 1, then Decimal.D0 has index 2 .. Decimal.D9 is 11 *)
 
 let digit_of_char c =
-  assert ('0' <= c && c <= '9');
-  Char.code c - Char.code '0' + 2
+  assert ('0' <= c && c <= '9' || 'a' <= c && c <= 'f');
+  if c <= '9' then Char.code c - Char.code '0' + 2
+  else Char.code c - Char.code 'a' + 12
 
 let char_of_digit n =
-  assert (2<=n && n<=11);
-  Char.chr (n-2 + Char.code '0')
+  assert (2<=n && n<=17);
+  if n <= 11 then Char.chr (n-2 + Char.code '0')
+  else Char.chr (n-12 + Char.code 'a')
 
-let coquint_of_rawnum uint n =
+let coquint_of_rawnum inds c n =
+  let uint = match c with CDec -> inds.dec_uint | CHex -> inds.hex_uint in
   let nil = mkConstruct (uint,1) in
   match n with None -> nil | Some n ->
   let str = NumTok.UnsignedNat.to_string n in
+  let str = match c with
+    | CDec -> str
+    | CHex -> String.sub str 2 (String.length str - 2) in  (* cut "0x" *)
   let rec do_chars s i acc =
     if i < 0 then acc
     else
@@ -620,60 +673,125 @@ let coquint_of_rawnum uint n =
   in
   do_chars str (String.length str - 1) nil
 
-let coqint_of_rawnum inds (sign,n) =
-  let uint = coquint_of_rawnum inds.uint (Some n) in
+let coqint_of_rawnum inds c (sign,n) =
+  let ind = match c with CDec -> inds.dec_int | CHex -> inds.hex_int in
+  let uint = coquint_of_rawnum inds c (Some n) in
   let pos_neg = match sign with SPlus -> 1 | SMinus -> 2 in
-  mkApp (mkConstruct (inds.int, pos_neg), [|uint|])
+  mkApp (mkConstruct (ind, pos_neg), [|uint|])
 
-let coqdecimal_of_rawnum inds n =
-  let i, f, e = NumTok.Signed.to_decimal_and_exponent n in
-  let i = coqint_of_rawnum inds.int i in
-  let f = coquint_of_rawnum inds.int.uint f in
+let coqnumeral_of_rawnum inds c n =
+  let ind = match c with CDec -> inds.decimal | CHex -> inds.hexadecimal in
+  let i, f, e = NumTok.Signed.to_int_frac_and_exponent n in
+  let i = coqint_of_rawnum inds.int c i in
+  let f = coquint_of_rawnum inds.int c f in
   match e with
-  | None -> mkApp (mkConstruct (inds.decimal, 1), [|i; f|])  (* Decimal *)
+  | None -> mkApp (mkConstruct (ind, 1), [|i; f|])  (* (D|Hexad)ecimal *)
   | Some e ->
-    let e = coqint_of_rawnum inds.int e in
-    mkApp (mkConstruct (inds.decimal, 2), [|i; f; e|])  (* DecimalExp *)
+    let e = coqint_of_rawnum inds.int CDec e in
+    mkApp (mkConstruct (ind, 2), [|i; f; e|])  (* (D|Hexad)ecimalExp *)
 
-let rawnum_of_coquint c =
+let mkDecHex ind c n = match c with
+  | CDec -> mkApp (mkConstruct (ind, 1), [|n|])  (* (UInt|Int|)Dec *)
+  | CHex -> mkApp (mkConstruct (ind, 2), [|n|])  (* (UInt|Int|)Hex *)
+
+exception NonDecimal
+
+let decimal_coqnumeral_of_rawnum inds n =
+  if NumTok.Signed.classify n <> CDec then raise NonDecimal;
+  coqnumeral_of_rawnum inds CDec n
+
+let coqnumeral_of_rawnum inds n =
+  let c = NumTok.Signed.classify n in
+  let n = coqnumeral_of_rawnum inds c n in
+  mkDecHex inds.numeral c n
+
+let decimal_coquint_of_rawnum inds n =
+  if NumTok.UnsignedNat.classify n <> CDec then raise NonDecimal;
+  coquint_of_rawnum inds CDec (Some n)
+
+let coquint_of_rawnum inds n =
+  let c = NumTok.UnsignedNat.classify n in
+  let n = coquint_of_rawnum inds c (Some n) in
+  mkDecHex inds.uint c n
+
+let decimal_coqint_of_rawnum inds n =
+  if NumTok.SignedNat.classify n <> CDec then raise NonDecimal;
+  coqint_of_rawnum inds CDec n
+
+let coqint_of_rawnum inds n =
+  let c = NumTok.SignedNat.classify n in
+  let n = coqint_of_rawnum inds c n in
+  mkDecHex inds.int c n
+
+let rawnum_of_coquint cl c =
   let rec of_uint_loop c buf =
     match Constr.kind c with
     | Construct ((_,1), _) (* Nil *) -> ()
     | App (c, [|a|]) ->
        (match Constr.kind c with
-        | Construct ((_,n), _) (* D0 to D9 *) ->
+        | Construct ((_,n), _) (* D0 to Df *) ->
            let () = Buffer.add_char buf (char_of_digit n) in
            of_uint_loop a buf
         | _ -> raise NotAValidPrimToken)
     | _ -> raise NotAValidPrimToken
   in
   let buf = Buffer.create 64 in
+  if cl = CHex then (Buffer.add_char buf '0'; Buffer.add_char buf 'x');
   let () = of_uint_loop c buf in
-  if Int.equal (Buffer.length buf) 0 then
+  if Int.equal (Buffer.length buf) (match cl with CDec -> 0 | CHex -> 2) then
     (* To avoid ambiguities between Nil and (D0 Nil), we choose
        to not display Nil alone as "0" *)
     raise NotAValidPrimToken
   else NumTok.UnsignedNat.of_string (Buffer.contents buf)
 
-let rawnum_of_coqint c =
+let rawnum_of_coqint cl c =
   match Constr.kind c with
   | App (c,[|c'|]) ->
      (match Constr.kind c with
-      | Construct ((_,1), _) (* Pos *) -> (SPlus,rawnum_of_coquint c')
-      | Construct ((_,2), _) (* Neg *) -> (SMinus,rawnum_of_coquint c')
+      | Construct ((_,1), _) (* Pos *) -> (SPlus,rawnum_of_coquint cl c')
+      | Construct ((_,2), _) (* Neg *) -> (SMinus,rawnum_of_coquint cl c')
       | _ -> raise NotAValidPrimToken)
   | _ -> raise NotAValidPrimToken
 
-let rawnum_of_decimal c =
+let rawnum_of_coqnumeral cl c =
   let of_ife i f e =
-    let n = rawnum_of_coqint i in
-    let f = try Some (rawnum_of_coquint f) with NotAValidPrimToken -> None in
-    let e = match e with None -> None | Some e -> Some (rawnum_of_coqint e) in
-    NumTok.Signed.of_decimal_and_exponent n f e in
+    let n = rawnum_of_coqint cl i in
+    let f = try Some (rawnum_of_coquint cl f) with NotAValidPrimToken -> None in
+    let e = match e with None -> None | Some e -> Some (rawnum_of_coqint CDec e) in
+    NumTok.Signed.of_int_frac_and_exponent n f e in
   match Constr.kind c with
   | App (_,[|i; f|]) -> of_ife i f None
   | App (_,[|i; f; e|]) -> of_ife i f (Some e)
   | _ -> raise NotAValidPrimToken
+
+let destDecHex c = match Constr.kind c with
+  | App (c,[|c'|]) ->
+     (match Constr.kind c with
+      | Construct ((_,1), _) (* (UInt|Int|)Dec *) -> CDec, c'
+      | Construct ((_,2), _) (* (UInt|Int|)Hex *) -> CHex, c'
+      | _ -> raise NotAValidPrimToken)
+  | _ -> raise NotAValidPrimToken
+
+let decimal_rawnum_of_coqnumeral c =
+  rawnum_of_coqnumeral CDec c
+
+let rawnum_of_coqnumeral c =
+  let cl, c = destDecHex c in
+  rawnum_of_coqnumeral cl c
+
+let decimal_rawnum_of_coquint c =
+  rawnum_of_coquint CDec c
+
+let rawnum_of_coquint c =
+  let cl, c = destDecHex c in
+  rawnum_of_coquint cl c
+
+let decimal_rawnum_of_coqint c =
+  rawnum_of_coqint CDec c
+
+let rawnum_of_coqint c =
+  let cl, c = destDecHex c in
+  rawnum_of_coqint cl c
 
 (***********************************************************************)
 
@@ -768,15 +886,24 @@ let interp o ?loc n =
   let c = match fst o.to_kind, NumTok.Signed.to_int n with
     | Int int_ty, Some n ->
        coqint_of_rawnum int_ty n
-    | UInt uint_ty, Some (SPlus, n) ->
-       coquint_of_rawnum uint_ty (Some n)
+    | UInt int_ty, Some (SPlus, n) ->
+       coquint_of_rawnum int_ty n
+    | DecimalInt int_ty, Some n ->
+       (try decimal_coqint_of_rawnum int_ty n
+        with NonDecimal -> no_such_prim_token "number" ?loc o.ty_name)
+    | DecimalUInt int_ty, Some (SPlus, n) ->
+       (try decimal_coquint_of_rawnum int_ty n
+        with NonDecimal -> no_such_prim_token "number" ?loc o.ty_name)
     | Z z_pos_ty, Some n ->
        z_of_bigint z_pos_ty (NumTok.SignedNat.to_bigint n)
     | Int63, Some n ->
        interp_int63 ?loc (NumTok.SignedNat.to_bigint n)
-    | (Int _ | UInt _ | Z _ | Int63), _ ->
+    | (Int _ | UInt _ | DecimalInt _ | DecimalUInt _ | Z _ | Int63), _ ->
        no_such_prim_token "number" ?loc o.ty_name
-    | Decimal decimal_ty, _ -> coqdecimal_of_rawnum decimal_ty n
+    | Numeral numeral_ty, _ -> coqnumeral_of_rawnum numeral_ty n
+    | Decimal numeral_ty, _ ->
+       (try decimal_coqnumeral_of_rawnum numeral_ty n
+        with NonDecimal -> no_such_prim_token "number" ?loc o.ty_name)
   in
   let env = Global.env () in
   let sigma = Evd.from_env env in
@@ -797,9 +924,12 @@ let uninterp o n =
     begin function
       | (Int _, c) -> NumTok.Signed.of_int (rawnum_of_coqint c)
       | (UInt _, c) -> NumTok.Signed.of_nat (rawnum_of_coquint c)
-      | (Z _, c) -> NumTok.Signed.of_bigint (bigint_of_z c)
-      | (Int63, c) -> NumTok.Signed.of_bigint (bigint_of_int63 c)
-      | (Decimal _, c) -> rawnum_of_decimal c
+      | (Z _, c) -> NumTok.Signed.of_bigint CDec (bigint_of_z c)
+      | (Int63, c) -> NumTok.Signed.of_bigint CDec (bigint_of_int63 c)
+      | (Numeral _, c) -> rawnum_of_coqnumeral c
+      | (DecimalInt _, c) -> NumTok.Signed.of_int (decimal_rawnum_of_coqint c)
+      | (DecimalUInt _, c) -> NumTok.Signed.of_nat (decimal_rawnum_of_coquint c)
+      | (Decimal _, c) -> decimal_rawnum_of_coqnumeral c
     end o n
 end
 
@@ -932,7 +1062,7 @@ let prim_token_interp_infos =
 (* Table from global_reference to backtrack-able informations about
    prim_token uninterpretation (in particular uninterpreter unique id). *)
 let prim_token_uninterp_infos =
-  ref (GlobRef.Map.empty : (scope_name * prim_token_interp_info * bool) GlobRef.Map.t)
+  ref (GlobRef.Map.empty : ((scope_name * (prim_token_interp_info * bool)) list) GlobRef.Map.t)
 
 let hashtbl_check_and_set allow_overwrite uid f h eq =
   match Hashtbl.find h uid with
@@ -968,10 +1098,13 @@ let cache_prim_token_interpretation (_,infos) =
   check_scope ~tolerant:true sc;
   prim_token_interp_infos :=
     String.Map.add sc (infos.pt_required,ptii) !prim_token_interp_infos;
-  List.iter (fun r -> prim_token_uninterp_infos :=
-                        GlobRef.Map.add r (sc,ptii,infos.pt_in_match)
-                          !prim_token_uninterp_infos)
-            infos.pt_refs
+  let add_uninterp r =
+    let l = try GlobRef.Map.find r !prim_token_uninterp_infos with Not_found -> [] in
+    let l = List.remove_assoc_f String.equal sc l in
+    prim_token_uninterp_infos :=
+      GlobRef.Map.add r ((sc,(ptii,infos.pt_in_match)) :: l)
+        !prim_token_uninterp_infos in
+  List.iter add_uninterp infos.pt_refs
 
 let subst_prim_token_interpretation (subs,infos) =
   { infos with
@@ -1028,12 +1161,17 @@ let declare_string_interpreter ?(local=false) sc dir interp (patl,uninterp,b) =
 
 let check_required_module ?loc sc (sp,d) =
   try let _ = Nametab.global_of_path sp in ()
-  with Not_found ->
+  with Not_found as exn ->
+    let _, info = Exninfo.capture exn in
     match d with
-    | [] -> user_err ?loc ~hdr:"prim_token_interpreter"
-       (str "Cannot interpret in " ++ str sc ++ str " because " ++ pr_path sp ++ str " could not be found in the current environment.")
-    | _ -> user_err ?loc ~hdr:"prim_token_interpreter"
-       (str "Cannot interpret in " ++ str sc ++ str " without requiring first module " ++ str (List.last d) ++ str ".")
+    | [] ->
+      user_err ?loc ~info ~hdr:"prim_token_interpreter"
+        (str "Cannot interpret in " ++ str sc ++ str " because " ++ pr_path sp ++
+         str " could not be found in the current environment.")
+    | _ ->
+      user_err ?loc ~info ~hdr:"prim_token_interpreter"
+        (str "Cannot interpret in " ++ str sc ++ str " without requiring first module " ++
+         str (List.last d) ++ str ".")
 
 (* Look if some notation or numeral printer in [scope] can be used in
    the scope stack [scopes], and if yes, using delimiters or not *)
@@ -1123,8 +1261,8 @@ let find_notation ntn sc =
   NotationMap.find ntn (find_scope sc).notations
 
 let notation_of_prim_token = function
-  | Numeral (SPlus,n) -> InConstrEntrySomeLevel, NumTok.Unsigned.sprint n
-  | Numeral (SMinus,n) -> InConstrEntrySomeLevel, "- "^NumTok.Unsigned.sprint n
+  | Constrexpr.Numeral (SPlus,n) -> InConstrEntry, NumTok.Unsigned.sprint n
+  | Constrexpr.Numeral (SMinus,n) -> InConstrEntry, "- "^NumTok.Unsigned.sprint n
   | String _ -> raise Not_found
 
 let find_prim_token check_allowed ?loc p sc =
@@ -1151,12 +1289,13 @@ let find_prim_token check_allowed ?loc p sc =
 
 let interp_prim_token_gen ?loc g p local_scopes =
   let scopes = make_current_scopes local_scopes in
-  let p_as_ntn = try notation_of_prim_token p with Not_found -> InConstrEntrySomeLevel,"" in
+  let p_as_ntn = try notation_of_prim_token p with Not_found -> InConstrEntry,"" in
   try
     let (pat,loc), sc = find_interpretation p_as_ntn (find_prim_token ?loc g p) scopes in
     pat, (loc,sc)
-  with Not_found ->
-    user_err ?loc ~hdr:"interp_prim_token"
+  with Not_found as exn ->
+    let _, info = Exninfo.capture exn in
+    user_err ?loc ~info ~hdr:"interp_prim_token"
     ((match p with
       | Numeral _ ->
          str "No interpretation for numeral " ++ pr_notation (notation_of_prim_token p)
@@ -1189,9 +1328,10 @@ let interp_notation ?loc ntn local_scopes =
     let (n,sc) = find_interpretation ntn (find_notation ntn) scopes in
     Option.iter (fun d -> warn_deprecated_notation ?loc (ntn,d)) n.not_deprecation;
     n.not_interp, (n.not_location, sc)
-  with Not_found ->
-    user_err ?loc
-    (str "Unknown interpretation for notation " ++ pr_notation ntn ++ str ".")
+  with Not_found as exn ->
+    let _, info = Exninfo.capture exn in
+    user_err ?loc ~info
+      (str "Unknown interpretation for notation " ++ pr_notation ntn ++ str ".")
 
 let uninterp_notations c =
   List.map_append (fun key -> keymap_find key !notations_key_table)
@@ -1229,7 +1369,8 @@ module EntryCoercionOrd =
 
 module EntryCoercionMap = Map.Make(EntryCoercionOrd)
 
-let entry_coercion_map = ref EntryCoercionMap.empty
+let entry_coercion_map : (((entry_level option * entry_level option) * entry_coercion) list EntryCoercionMap.t) ref =
+  ref EntryCoercionMap.empty
 
 let level_ord lev lev' =
   match lev, lev' with
@@ -1242,13 +1383,18 @@ let rec search nfrom nto = function
   | ((pfrom,pto),coe)::l ->
     if level_ord pfrom nfrom && level_ord nto pto then coe else search nfrom nto l
 
-let decompose_custom_entry = function
+let make_notation_entry_level entry level =
+  match entry with
+  | InConstrEntry -> InConstrEntrySomeLevel
+  | InCustomEntry s -> InCustomEntryLevel (s,level)
+
+let decompose_notation_entry_level = function
   | InConstrEntrySomeLevel -> InConstrEntry, None
   | InCustomEntryLevel (s,n) -> InCustomEntry s, Some n
 
 let availability_of_entry_coercion entry entry' =
-  let entry, lev = decompose_custom_entry entry in
-  let entry', lev' = decompose_custom_entry entry' in
+  let entry, lev = decompose_notation_entry_level entry in
+  let entry', lev' = decompose_notation_entry_level entry' in
   if notation_entry_eq entry entry' && level_ord lev' lev then Some []
   else
     try Some (search lev lev' (EntryCoercionMap.find (entry,entry') !entry_coercion_map))
@@ -1270,28 +1416,27 @@ let rec insert_coercion_path path = function
       else if shorter_path path path' then path::allpaths
       else path'::insert_coercion_path path paths
 
-let declare_entry_coercion (scope,(entry,_) as specific_ntn) entry' =
-  let entry, lev = decompose_custom_entry entry in
-  let entry', lev' = decompose_custom_entry entry' in
+let declare_entry_coercion (scope,(entry,key)) lev entry' =
+  let entry', lev' = decompose_notation_entry_level entry' in
   (* Transitive closure *)
   let toaddleft =
     EntryCoercionMap.fold (fun (entry'',entry''') paths l ->
         List.fold_right (fun ((lev'',lev'''),path) l ->
         if notation_entry_eq entry entry''' && level_ord lev lev''' &&
            not (notation_entry_eq entry' entry'')
-        then ((entry'',entry'),((lev'',lev'),path@[specific_ntn]))::l else l) paths l)
+        then ((entry'',entry'),((lev'',lev'),path@[(scope,(entry,key))]))::l else l) paths l)
       !entry_coercion_map [] in
   let toaddright =
     EntryCoercionMap.fold (fun (entry'',entry''') paths l ->
         List.fold_right (fun ((lev'',lev'''),path) l ->
         if entry' = entry'' && level_ord lev' lev'' && entry <> entry'''
-        then ((entry,entry'''),((lev,lev'''),path@[specific_ntn]))::l else l) paths l)
+        then ((entry,entry'''),((lev,lev'''),path@[(scope,(entry,key))]))::l else l) paths l)
       !entry_coercion_map [] in
   entry_coercion_map :=
     List.fold_right (fun (pair,path) ->
         let olds = try EntryCoercionMap.find pair !entry_coercion_map with Not_found -> [] in
         EntryCoercionMap.add pair (insert_coercion_path path olds))
-      (((entry,entry'),((lev,lev'),[specific_ntn]))::toaddright@toaddleft)
+      (((entry,entry'),((lev,lev'),[(scope,(entry,key))]))::toaddright@toaddleft)
       !entry_coercion_map
 
 let entry_has_global_map = ref String.Map.empty
@@ -1324,47 +1469,80 @@ let entry_has_ident = function
   | InCustomEntryLevel (s,n) ->
      try String.Map.find s !entry_has_ident_map <= n with Not_found -> false
 
-let uninterp_prim_token c =
-  match glob_prim_constr_key c with
-  | None -> raise Notation_ops.No_match
-  | Some r ->
-     try
-       let (sc,info,_) = GlobRef.Map.find r !prim_token_uninterp_infos in
-       let uninterp = match info with
-         | Uid uid -> Hashtbl.find prim_token_uninterpreters uid
-         | NumeralNotation o -> InnerPrimToken.RawNumUninterp (Numeral.uninterp o)
-         | StringNotation o -> InnerPrimToken.StringUninterp (Strings.uninterp o)
-       in
-       match InnerPrimToken.do_uninterp uninterp (AnyGlobConstr c) with
-       | None -> raise Notation_ops.No_match
-       | Some n -> (sc,n)
-     with Not_found -> raise Notation_ops.No_match
-
-let uninterp_prim_token_cases_pattern c =
-  match glob_constr_of_closed_cases_pattern (Global.env()) c with
-  | exception Not_found -> raise Notation_ops.No_match
-  | na,c -> let (sc,n) = uninterp_prim_token c in (na,sc,n)
-
 let availability_of_prim_token n printer_scope local_scopes =
   let f scope =
     try
       let uid = snd (String.Map.find scope !prim_token_interp_infos) in
       let open InnerPrimToken in
       match n, uid with
-      | Numeral _, NumeralNotation _ -> true
+      | Constrexpr.Numeral _, NumeralNotation _ -> true
       | _, NumeralNotation _ -> false
       | String _, StringNotation _ -> true
       | _, StringNotation _ -> false
       | _, Uid uid ->
         let interp = Hashtbl.find prim_token_interpreters uid in
         match n, interp with
-        | Numeral _, (RawNumInterp _ | BigNumInterp _) -> true
+        | Constrexpr.Numeral _, (RawNumInterp _ | BigNumInterp _) -> true
         | String _, StringInterp _ -> true
         | _ -> false
     with Not_found -> false
   in
   let scopes = make_current_scopes local_scopes in
   Option.map snd (find_without_delimiters f (NotationInScope printer_scope,None) scopes)
+
+let rec find_uninterpretation need_delim def find = function
+  | [] ->
+      List.find_map
+        (fun (sc,_,_) -> try Some (find need_delim sc) with Not_found -> None)
+        def
+  | OpenScopeItem scope :: scopes ->
+      (try find need_delim scope
+       with Not_found -> find_uninterpretation need_delim def find scopes)  (* TODO: here we should also update the need_delim list with all regular notations in scope [scope] that could shadow a numeral notation *)
+  | LonelyNotationItem ntn::scopes ->
+      find_uninterpretation (ntn::need_delim) def find scopes
+
+let uninterp_prim_token c local_scopes =
+  match glob_prim_constr_key c with
+  | None -> raise Notation_ops.No_match
+  | Some r ->
+     let uninterp (sc,(info,_)) =
+       try
+         let uninterp = match info with
+           | Uid uid -> Hashtbl.find prim_token_uninterpreters uid
+           | NumeralNotation o -> InnerPrimToken.RawNumUninterp (Numeral.uninterp o)
+           | StringNotation o -> InnerPrimToken.StringUninterp (Strings.uninterp o)
+         in
+         match InnerPrimToken.do_uninterp uninterp (AnyGlobConstr c) with
+         | None -> None
+         | Some n -> Some (sc,n)
+       with Not_found -> None in
+     let add_key (sc,n) =
+       Option.map (fun k -> sc,n,k) (availability_of_prim_token n sc local_scopes) in
+     let l =
+       try GlobRef.Map.find r !prim_token_uninterp_infos
+       with Not_found -> raise Notation_ops.No_match in
+     let l = List.map_filter uninterp l in
+     let l = List.map_filter add_key l in
+     let find need_delim sc =
+       let _,n,k = List.find (fun (sc',_,_) -> String.equal sc' sc) l in
+       if k <> None then n,k else
+         let hidden =
+           List.exists
+             (fun n' -> notation_eq n' (notation_of_prim_token n))
+             need_delim in
+         if not hidden then n,k else
+           match (String.Map.find sc !scope_map).delimiters with
+           | Some k -> n,Some k
+           | None -> raise Not_found
+     in
+     let scopes = make_current_scopes local_scopes in
+     try find_uninterpretation [] l find scopes
+     with Not_found -> match l with (_,n,k)::_ -> n,k | [] -> raise Notation_ops.No_match
+
+let uninterp_prim_token_cases_pattern c local_scopes =
+  match glob_constr_of_closed_cases_pattern (Global.env()) c with
+  | exception Not_found -> raise Notation_ops.No_match
+  | na,c -> let (sc,n) = uninterp_prim_token c local_scopes in (na,sc,n)
 
 (* Miscellaneous *)
 
@@ -1412,8 +1590,8 @@ type scope_class = cl_typ
 let scope_class_compare : scope_class -> scope_class -> int =
   cl_typ_ord
 
-let compute_scope_class sigma t =
-  let (cl,_,_) = find_class_type sigma t in
+let compute_scope_class env sigma t =
+  let (cl,_,_) = find_class_type env sigma t in
   cl
 
 module ScopeClassOrd =
@@ -1442,22 +1620,23 @@ let find_scope_class_opt = function
 (**********************************************************************)
 (* Special scopes associated to arguments of a global reference *)
 
-let rec compute_arguments_classes sigma t =
-  match EConstr.kind sigma (Reductionops.whd_betaiotazeta sigma t) with
-    | Prod (_,t,u) ->
-        let cl = try Some (compute_scope_class sigma t) with Not_found -> None in
-        cl :: compute_arguments_classes sigma u
+let rec compute_arguments_classes env sigma t =
+  match EConstr.kind sigma (Reductionops.whd_betaiotazeta env sigma t) with
+    | Prod (na, t, u) ->
+        let env = EConstr.push_rel (Context.Rel.Declaration.LocalAssum (na, t)) env in
+        let cl = try Some (compute_scope_class env sigma t) with Not_found -> None in
+        cl :: compute_arguments_classes env sigma u
     | _ -> []
 
-let compute_arguments_scope_full sigma t =
-  let cls = compute_arguments_classes sigma t in
+let compute_arguments_scope_full env sigma t =
+  let cls = compute_arguments_classes env sigma t in
   let scs = List.map find_scope_class_opt cls in
   scs, cls
 
-let compute_arguments_scope sigma t = fst (compute_arguments_scope_full sigma t)
+let compute_arguments_scope env sigma t = fst (compute_arguments_scope_full env sigma t)
 
-let compute_type_scope sigma t =
-  find_scope_class_opt (try Some (compute_scope_class sigma t) with Not_found -> None)
+let compute_type_scope env sigma t =
+  find_scope_class_opt (try Some (compute_scope_class env sigma t) with Not_found -> None)
 
 let current_type_scope_name () =
    find_scope_class_opt (Some CL_SORT)
@@ -1495,15 +1674,16 @@ let load_arguments_scope _ (_,(_,r,n,scl,cls)) =
 let cache_arguments_scope o =
   load_arguments_scope 1 o
 
-let subst_scope_class subst cs =
-  try Some (subst_cl_typ subst cs) with Not_found -> None
+let subst_scope_class env subst cs =
+  try Some (subst_cl_typ env subst cs) with Not_found -> None
 
 let subst_arguments_scope (subst,(req,r,n,scl,cls)) =
   let r' = fst (subst_global subst r) in
   let subst_cl ocl = match ocl with
     | None -> ocl
     | Some cl ->
-        match subst_scope_class subst cl with
+        let env = Global.env () in
+        match subst_scope_class env subst cl with
         | Some cl'  as ocl' when cl' != cl -> ocl'
         | _ -> ocl in
   let cls' = List.Smart.map subst_cl cls in
@@ -1529,7 +1709,7 @@ let rebuild_arguments_scope sigma (req,r,n,l,_) =
     | ArgsScopeAuto ->
       let env = Global.env () in (*FIXME?*)
       let typ = EConstr.of_constr @@ fst (Typeops.type_of_global_in_context env r) in
-      let scs,cls = compute_arguments_scope_full sigma typ in
+      let scs,cls = compute_arguments_scope_full env sigma typ in
       (req,r,List.length scs,scs,cls)
     | ArgsScopeManual ->
       (* Add to the manually given scopes the one found automatically
@@ -1537,7 +1717,7 @@ let rebuild_arguments_scope sigma (req,r,n,l,_) =
          of the manually given scopes to avoid further re-computations. *)
       let env = Global.env () in (*FIXME?*)
       let typ = EConstr.of_constr @@ fst (Typeops.type_of_global_in_context env r) in
-      let l',cls = compute_arguments_scope_full sigma typ in
+      let l',cls = compute_arguments_scope_full env sigma typ in
       let l1 = List.firstn n l' in
       let cls1 = List.firstn n cls in
       (req,r,0,l1@l,cls1)
@@ -1584,7 +1764,7 @@ let find_arguments_scope r =
 let declare_ref_arguments_scope sigma ref =
   let env = Global.env () in (* FIXME? *)
   let typ = EConstr.of_constr @@ fst @@ Typeops.type_of_global_in_context env ref in
-  let (scs,cls as o) = compute_arguments_scope_full sigma typ in
+  let (scs,cls as o) = compute_arguments_scope_full env sigma typ in
   declare_arguments_scope_gen ArgsScopeAuto ref (List.length scs) o
 
 (********************************)
@@ -1771,10 +1951,10 @@ let browse_notation strict ntn map =
       map [] in
   List.sort (fun x y -> String.compare (snd (fst x)) (snd (fst y))) l
 
-let global_reference_of_notation test (ntn,(sc,c,_)) =
+let global_reference_of_notation ~head test (ntn,(sc,c,_)) =
   match c with
   | NRef ref when test ref -> Some (ntn,sc,ref)
-  | NApp (NRef ref, l) when List.for_all isNVar_or_NHole l && test ref ->
+  | NApp (NRef ref, l) when head || List.for_all isNVar_or_NHole l && test ref ->
       Some (ntn,sc,ref)
   | _ -> None
 
@@ -1786,14 +1966,14 @@ let error_notation_not_reference ?loc ntn =
    (str "Unable to interpret " ++ quote (str ntn) ++
     str " as a reference.")
 
-let interp_notation_as_global_reference ?loc test ntn sc =
+let interp_notation_as_global_reference ?loc ~head test ntn sc =
   let scopes = match sc with
   | Some sc ->
       let scope = find_scope (find_delimiters_scope sc) in
       String.Map.add sc scope String.Map.empty
   | None -> !scope_map in
   let ntns = browse_notation true ntn scopes in
-  let refs = List.map (global_reference_of_notation test) ntns in
+  let refs = List.map (global_reference_of_notation ~head test) ntns in
   match Option.List.flatten refs with
   | [_,_,ref] -> ref
   | [] -> error_notation_not_reference ?loc ntn

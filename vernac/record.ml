@@ -71,7 +71,7 @@ let interp_fields_evars env sigma ~ninds ~nparams impls_env nots l =
          let impls =
            match i with
            | Anonymous -> impls
-           | Name id -> Id.Map.add id (compute_internalization_data env sigma Constrintern.Method t' impl) impls
+           | Name id -> Id.Map.add id (compute_internalization_data env sigma id Constrintern.Method t' impl) impls
          in
          let d = match b' with
            | None -> LocalAssum (make_annot i r,t')
@@ -121,7 +121,7 @@ let typecheck_params_and_fields def poly pl ps records =
      any Set <= i constraint for universes that might actually be instantiated with Prop. *)
   let is_template =
     List.exists (fun (_, arity, _, _) -> Option.cata check_anonymous_type true arity) records in
-  let env0 = if not poly && is_template then Environ.set_universes_lbound env0 Univ.Level.prop else env0 in
+  let env0 = if not poly && is_template then Environ.set_universes_lbound env0 UGraph.Bound.Prop else env0 in
   let sigma, decl = Constrexpr_ops.interp_univ_decl_opt env0 pl in
   let () =
     let error bk {CAst.loc; v=name} =
@@ -223,7 +223,7 @@ let warn_cannot_define_projection =
 (* If a projection is not definable, we throw an error if the user
 asked it to be a coercion. Otherwise, we just print an info
 message. The user might still want to name the field of the record. *)
-let warning_or_error coe indsp err =
+let warning_or_error ~info coe indsp err =
   let st = match err with
     | MissingProj (fi,projs) ->
         let s,have = if List.length projs > 1 then "s","were" else "","was" in
@@ -246,7 +246,7 @@ let warning_or_error coe indsp err =
           | _ ->
               (Id.print fi ++ strbrk " cannot be defined because it is not typable.")
   in
-  if coe then user_err ~hdr:"structure" st;
+  if coe then user_err ~hdr:"structure" ~info st;
   warn_cannot_define_projection (hov 0 st)
 
 type field_status =
@@ -320,90 +320,93 @@ let declare_projections indsp ctx ?(kind=Decls.StructureComponent) binder_name f
   let (_,_,kinds,sp_projs,_) =
     List.fold_left3
       (fun (nfi,i,kinds,sp_projs,subst) flags decl impls ->
-        let fi = RelDecl.get_name decl in
-        let ti = RelDecl.get_type decl in
-        let (sp_projs,i,subst) =
-          match fi with
-          | Anonymous ->
-              (None::sp_projs,i,NoProjection fi::subst)
-          | Name fid -> try
-            let kn, term =
-              if is_local_assum decl && primitive then
-                let p = Projection.Repr.make indsp
-                    ~proj_npars:mib.mind_nparams
-                    ~proj_arg:i
-                    (Label.of_id fid)
-                in
-                (* Already defined by declare_mind silently *)
-                let kn = Projection.Repr.constant p in
-                Declare.definition_message fid;
-                kn, mkProj (Projection.make p false,mkRel 1)
-              else
-                let ccl = subst_projection fid subst ti in
-                let body = match decl with
-                  | LocalDef (_,ci,_) -> subst_projection fid subst ci
-                  | LocalAssum ({binder_relevance=rci},_) ->
-                    (* [ccl] is defined in context [params;x:rp] *)
-                    (* [ccl'] is defined in context [params;x:rp;x:rp] *)
-                    let ccl' = liftn 1 2 ccl in
-                    let p = mkLambda (x, lift 1 rp, ccl') in
-                    let branch = it_mkLambda_or_LetIn (mkRel nfi) lifted_fields in
-                    let ci = Inductiveops.make_case_info env indsp rci LetStyle in
-                    (* Record projections have no is *)
-                    mkCase (ci, p, mkRel 1, [|branch|])
-                in
-                let proj =
-                  it_mkLambda_or_LetIn (mkLambda (x,rp,body)) paramdecls in
-                let projtyp =
-                  it_mkProd_or_LetIn (mkProd (x,rp,ccl)) paramdecls in
-                try
-                  let entry = Declare.definition_entry ~univs:ctx ~types:projtyp proj in
-                  let kind = Decls.IsDefinition kind in
-                  let kn = declare_constant ~name:fid ~kind (Declare.DefinitionEntry entry) in
-                  let constr_fip =
-                    let proj_args = (*Rel 1 refers to "x"*) paramargs@[mkRel 1] in
-                      applist (mkConstU (kn,u),proj_args)
-                  in
-                  Declare.definition_message fid;
-                    kn, constr_fip
-                with Type_errors.TypeError (ctx,te) ->
-                  raise (NotDefinable (BadTypedProj (fid,ctx,te)))
-            in
-            let refi = GlobRef.ConstRef kn in
-            Impargs.maybe_declare_manual_implicits false refi impls;
-            if flags.pf_subclass then begin
-              let cl = ComCoercion.class_of_global (GlobRef.IndRef indsp) in
-                ComCoercion.try_add_new_coercion_with_source refi ~local:false ~poly ~source:cl
-            end;
-            let i = if is_local_assum decl then i+1 else i in
-              (Some kn::sp_projs, i, Projection term::subst)
-            with NotDefinable why ->
-              warning_or_error flags.pf_subclass indsp why;
-              (None::sp_projs,i,NoProjection fi::subst) in
-      (nfi - 1, i, { Recordops.pk_name = fi ; pk_true_proj = is_local_assum decl ; pk_canonical = flags.pf_canonical } :: kinds, sp_projs, subst))
+         let fi = RelDecl.get_name decl in
+         let ti = RelDecl.get_type decl in
+         let (sp_projs,i,subst) =
+           match fi with
+           | Anonymous ->
+             (None::sp_projs,i,NoProjection fi::subst)
+           | Name fid ->
+             try
+               let ccl = subst_projection fid subst ti in
+               let body, p_opt = match decl with
+                 | LocalDef (_,ci,_) -> subst_projection fid subst ci, None
+                 | LocalAssum ({binder_relevance=rci},_) ->
+                   (* [ccl] is defined in context [params;x:rp] *)
+                   (* [ccl'] is defined in context [params;x:rp;x:rp] *)
+                   if primitive then
+                     let p = Projection.Repr.make indsp
+                         ~proj_npars:mib.mind_nparams ~proj_arg:i (Label.of_id fid) in
+                     mkProj (Projection.make p true, mkRel 1), Some p
+                   else
+                     let ccl' = liftn 1 2 ccl in
+                     let p = mkLambda (x, lift 1 rp, ccl') in
+                     let branch = it_mkLambda_or_LetIn (mkRel nfi) lifted_fields in
+                     let ci = Inductiveops.make_case_info env indsp rci LetStyle in
+                     (* Record projections have no is *)
+                     mkCase (ci, p, mkRel 1, [|branch|]), None
+               in
+               let proj = it_mkLambda_or_LetIn (mkLambda (x,rp,body)) paramdecls in
+               let projtyp = it_mkProd_or_LetIn (mkProd (x,rp,ccl)) paramdecls in
+               let entry = Declare.definition_entry ~univs:ctx ~types:projtyp proj in
+               let kind = Decls.IsDefinition kind in
+               let kn =
+                 try declare_constant ~name:fid ~kind (Declare.DefinitionEntry entry)
+                 with Type_errors.TypeError (ctx,te) as exn when not primitive ->
+                   let _, info = Exninfo.capture exn in
+                   Exninfo.iraise (NotDefinable (BadTypedProj (fid,ctx,te)),info)
+               in
+               Declare.definition_message fid;
+               let term = match p_opt with
+                 | Some p ->
+                   let _ = DeclareInd.declare_primitive_projection p kn in
+                   mkProj (Projection.make p false,mkRel 1)
+                 | None ->
+                   let proj_args = (*Rel 1 refers to "x"*) paramargs@[mkRel 1] in
+                   match decl with
+                   | LocalDef (_,ci,_) when primitive -> body
+                   | _ -> applist (mkConstU (kn,u),proj_args)
+               in
+               let refi = GlobRef.ConstRef kn in
+               Impargs.maybe_declare_manual_implicits false refi impls;
+               if flags.pf_subclass then begin
+                 let cl = ComCoercion.class_of_global (GlobRef.IndRef indsp) in
+                 ComCoercion.try_add_new_coercion_with_source refi ~local:false ~poly ~source:cl
+               end;
+               let i = if is_local_assum decl then i+1 else i in
+               (Some kn::sp_projs, i, Projection term::subst)
+             with NotDefinable why as exn ->
+               let _, info = Exninfo.capture exn in
+               warning_or_error ~info flags.pf_subclass indsp why;
+               (None::sp_projs,i,NoProjection fi::subst)
+         in
+         (nfi - 1, i, { Recordops.pk_name = fi ; pk_true_proj = is_local_assum decl ; pk_canonical = flags.pf_canonical } :: kinds, sp_projs, subst))
       (List.length fields,0,[],[],[]) flags (List.rev fields) (List.rev fieldimpls)
   in (kinds,sp_projs)
 
 open Typeclasses
 
 let load_structure i (_, structure) =
-  Recordops.register_structure (Global.env()) structure
+  Recordops.register_structure structure
 
 let cache_structure o =
   load_structure 1 o
 
-let subst_structure (subst, (id, kl, projs as obj)) =
+let subst_structure (subst, obj) =
   Recordops.subst_structure subst obj
 
 let discharge_structure (_, x) = Some x
 
-let inStruc : Recordops.struc_tuple -> obj =
+let rebuild_structure s = Recordops.rebuild_structure (Global.env()) s
+
+let inStruc : Recordops.struc_typ -> obj =
   declare_object {(default_object "STRUCTURE") with
     cache_function = cache_structure;
     load_function = load_structure;
     subst_function = subst_structure;
     classify_function = (fun x -> Substitute x);
-    discharge_function = discharge_structure }
+    discharge_function = discharge_structure;
+    rebuild_function = rebuild_structure; }
 
 let declare_structure_entry o =
   Lib.add_anonymous_leaf (inStruc o)
@@ -496,7 +499,15 @@ let declare_structure ~cumulative finite ubinders univs paramimpls params templa
     let kinds,sp_projs = declare_projections rsp ctx ~kind binder_name.(i) coers fieldimpls fields in
     let build = GlobRef.ConstructRef cstr in
     let () = if is_coe then ComCoercion.try_add_new_coercion build ~local:false ~poly in
-    let () = declare_structure_entry (cstr, List.rev kinds, List.rev sp_projs) in
+    let npars = Inductiveops.inductive_nparams (Global.env()) rsp in
+    let struc = {
+      Recordops.s_CONST = cstr;
+      s_PROJ = List.rev sp_projs;
+      s_PROJKIND = List.rev kinds;
+      s_EXPECTEDPARAM = npars;
+    }
+    in
+    let () = declare_structure_entry struc in
     rsp
   in
   List.mapi map record_data

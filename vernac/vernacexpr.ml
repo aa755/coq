@@ -61,15 +61,22 @@ type printable =
   | PrintStrategy of qualid or_by_notation option
   | PrintRegistered
 
-type search_about_item =
-  | SearchSubPattern of constr_pattern_expr
-  | SearchString of string * scope_name option
+type glob_search_where = InHyp | InConcl | Anywhere
+
+type search_item =
+  | SearchSubPattern of (glob_search_where * bool) * constr_pattern_expr
+  | SearchString of (glob_search_where * bool) * string * scope_name option
+  | SearchKind of Decls.logical_kind
+
+type search_request =
+  | SearchLiteral of search_item
+  | SearchDisjConj of (bool * search_request) list list
 
 type searchable =
   | SearchPattern of constr_pattern_expr
   | SearchRewrite of constr_pattern_expr
   | SearchHead of constr_pattern_expr
-  | Search of (bool * search_about_item) list
+  | Search of (bool * search_request) list
 
 type locatable =
   | LocateAny of qualid or_by_notation
@@ -121,10 +128,6 @@ type option_setting =
   | OptionSetInt of int
   | OptionSetString of string
 
-type option_ref_value =
-  | StringRefValue of string
-  | QualidRefValue of qualid
-
 (** Identifier and optional list of bound universes and constraints. *)
 
 type sort_expr = Sorts.family
@@ -134,11 +137,21 @@ type definition_expr =
   | DefineBody of local_binder_expr list * Genredexpr.raw_red_expr option * constr_expr
       * constr_expr option
 
+type syntax_modifier =
+  | SetItemLevel of string list * Notation_term.constr_as_binder_kind option * Extend.production_level
+  | SetLevel of int
+  | SetCustomEntry of string * int option
+  | SetAssoc of Gramlib.Gramext.g_assoc
+  | SetEntryType of string * Extend.simple_constr_prod_entry_key
+  | SetOnlyParsing
+  | SetOnlyPrinting
+  | SetFormat of string * lstring
+
 type decl_notation =
   { decl_ntn_string : lstring
   ; decl_ntn_interp : constr_expr
-  ; decl_ntn_only_parsing : bool
   ; decl_ntn_scope : scope_name option
+  ; decl_ntn_modifiers : syntax_modifier list
   }
 
 type 'a fix_expr_gen =
@@ -189,20 +202,12 @@ and typeclass_context = typeclass_constraint list
 type proof_expr =
   ident_decl * (local_binder_expr list * constr_expr)
 
-type syntax_modifier =
-  | SetItemLevel of string list * Notation_term.constr_as_binder_kind option * Extend.production_level
-  | SetLevel of int
-  | SetCustomEntry of string * int option
-  | SetAssoc of Gramlib.Gramext.g_assoc
-  | SetEntryType of string * Extend.simple_constr_prod_entry_key
-  | SetOnlyParsing
-  | SetOnlyPrinting
-  | SetFormat of string * lstring
+type opacity_flag = Opaque | Transparent
 
 type proof_end =
   | Admitted
   (*                         name in `Save ident` when closing goal *)
-  | Proved of Declare.opacity_flag * lident option
+  | Proved of opacity_flag * lident option
 
 type scheme =
   | InductionScheme of bool * qualid or_by_notation * sort_expr
@@ -290,6 +295,22 @@ type extend_name =
 
 type discharge = DoDischarge | NoDischarge
 
+type hint_info_expr = Constrexpr.constr_pattern_expr Typeclasses.hint_info_gen
+
+type reference_or_constr =
+  | HintsReference of Libnames.qualid
+  | HintsConstr of Constrexpr.constr_expr
+
+type hints_expr =
+  | HintsResolve of (hint_info_expr * bool * reference_or_constr) list
+  | HintsResolveIFF of bool * Libnames.qualid list * int option
+  | HintsImmediate of reference_or_constr list
+  | HintsUnfold of Libnames.qualid list
+  | HintsTransparency of Libnames.qualid Hints.hints_transparency_target * bool
+  | HintsMode of Libnames.qualid * Hints.hint_mode list
+  | HintsConstructors of Libnames.qualid list
+  | HintsExtern of int * Constrexpr.constr_expr option * Genarg.raw_generic_argument
+
 type nonrec vernac_expr =
 
   | VernacLoad of verbose_flag * string
@@ -340,18 +361,18 @@ type nonrec vernac_expr =
       local_binder_expr list * (* binders *)
       constr_expr * (* type *)
       (bool * constr_expr) option * (* body (bool=true when using {}) *)
-      Hints.hint_info_expr
+      hint_info_expr
 
   | VernacDeclareInstance of
       ident_decl * (* name *)
       local_binder_expr list * (* binders *)
       constr_expr * (* type *)
-      Hints.hint_info_expr
+      hint_info_expr
 
   | VernacContext of local_binder_expr list
 
   | VernacExistingInstance of
-    (qualid * Hints.hint_info_expr) list (* instances names, priorities and patterns *)
+    (qualid * hint_info_expr) list (* instances names, priorities and patterns *)
 
   | VernacExistingClass of qualid (* inductive or definition name *)
 
@@ -391,7 +412,7 @@ type nonrec vernac_expr =
   (* Commands *)
   | VernacCreateHintDb of string * bool
   | VernacRemoveHints of string list * qualid list
-  | VernacHints of string list * Hints.hints_expr
+  | VernacHints of string list * hints_expr
   | VernacSyntacticDefinition of
       lident * (Id.t list * constr_expr) *
       onlyparsing_flag
@@ -406,9 +427,9 @@ type nonrec vernac_expr =
   | VernacSetStrategy of
       (Conv_oracle.level * qualid or_by_notation list) list
   | VernacSetOption of bool (* Export modifier? *) * Goptions.option_name * option_setting
-  | VernacAddOption of Goptions.option_name * option_ref_value list
-  | VernacRemoveOption of Goptions.option_name * option_ref_value list
-  | VernacMemOption of Goptions.option_name * option_ref_value list
+  | VernacAddOption of Goptions.option_name * Goptions.table_value list
+  | VernacRemoveOption of Goptions.option_name * Goptions.table_value list
+  | VernacMemOption of Goptions.option_name * Goptions.table_value list
   | VernacPrintOption of Goptions.option_name
   | VernacCheckMayEval of Genredexpr.raw_red_expr option * Goal_select.t option * constr_expr
   | VernacGlobalCheck of constr_expr

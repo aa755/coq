@@ -114,8 +114,10 @@ let make_coqtop_args fname =
         (* We basically copy the code of Names.check_valid since it is not exported *)
         (* to coqide. This is to prevent a possible failure of parsing  "-topfile"  *)
         (* at initialization of coqtop (see #10286) *)
+        (* If the file name is a valid identifier, use it as toplevel name; *)
+        (* otherwise the default “Top” will be used. *)
         match Unicode.ident_refutation (Filename.chop_extension (Filename.basename fname)) with
-        | Some (_,x) -> output_string stderr (x^"\n"); exit 1
+        | Some _ -> args
         | None -> "-topfile"::fname::args
   in
   proj, args
@@ -1293,7 +1295,10 @@ let build_ui () =
   (* Initializing hooks *)
   let refresh_style style =
     let style = style_manager#style_scheme style in
-    let iter_session v = v.script#source_buffer#set_style_scheme style in
+    let iter_session v =
+      v.script#source_buffer#set_style_scheme style;
+      v.proof#source_buffer#set_style_scheme style;
+      v.messages#default_route#source_buffer#set_style_scheme style in
     List.iter iter_session notebook#pages
   in
   let refresh_language lang =

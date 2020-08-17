@@ -74,7 +74,7 @@ val find_delimiters_scope : ?loc:Loc.t -> delimiters -> scope_name
 
 (** {6 Declare and uses back and forth an interpretation of primitive token } *)
 
-(** A numeral interpreter is the pair of an interpreter for **decimal**
+(** A numeral interpreter is the pair of an interpreter for **(hexa)decimal**
    numbers in terms and an optional interpreter in pattern, if
    non integer or negative numbers are not supported, the interpreter
    must fail with an appropriate error message *)
@@ -120,23 +120,32 @@ type numnot_option =
   | Abstract of NumTok.UnsignedNat.t
 
 type int_ty =
-  { uint : Names.inductive;
+  { dec_uint : Names.inductive;
+    dec_int : Names.inductive;
+    hex_uint : Names.inductive;
+    hex_int : Names.inductive;
+    uint : Names.inductive;
     int : Names.inductive }
 
 type z_pos_ty =
   { z_ty : Names.inductive;
     pos_ty : Names.inductive }
 
-type decimal_ty =
+type numeral_ty =
   { int : int_ty;
-    decimal : Names.inductive }
+    decimal : Names.inductive;
+    hexadecimal : Names.inductive;
+    numeral : Names.inductive }
 
 type target_kind =
-  | Int of int_ty (* Coq.Init.Decimal.int + uint *)
-  | UInt of Names.inductive (* Coq.Init.Decimal.uint *)
+  | Int of int_ty (* Coq.Init.Numeral.int + uint *)
+  | UInt of int_ty (* Coq.Init.Numeral.uint *)
   | Z of z_pos_ty (* Coq.Numbers.BinNums.Z and positive *)
   | Int63 (* Coq.Numbers.Cyclic.Int63.Int63.int *)
-  | Decimal of decimal_ty (* Coq.Init.Decimal.decimal + uint + int *)
+  | Numeral of numeral_ty (* Coq.Init.Numeral.numeral + uint + int *)
+  | DecimalInt of int_ty (* Coq.Init.Decimal.int + uint (deprecated) *)
+  | DecimalUInt of int_ty (* Coq.Init.Decimal.uint (deprecated) *)
+  | Decimal of numeral_ty (* Coq.Init.Decimal.Decimal + uint + int (deprecated) *)
 
 type string_target_kind =
   | ListByte
@@ -206,9 +215,9 @@ val interp_prim_token_cases_pattern_expr : ?loc:Loc.t -> (GlobRef.t -> unit) -> 
    raise [No_match] if no such token *)
 
 val uninterp_prim_token :
-  'a glob_constr_g -> scope_name * prim_token
+  'a glob_constr_g -> subscopes -> prim_token * delimiters option
 val uninterp_prim_token_cases_pattern :
-  'a cases_pattern_g -> Name.t * scope_name * prim_token
+  'a cases_pattern_g -> subscopes -> Name.t * prim_token * delimiters option
 
 val availability_of_prim_token :
   prim_token -> scope_name -> subscopes -> delimiters option option
@@ -230,7 +239,12 @@ val declare_uninterpretation : interp_rule -> interpretation -> unit
 val interp_notation : ?loc:Loc.t -> notation -> subscopes ->
       interpretation * (notation_location * scope_name option)
 
-type notation_rule = interp_rule * interpretation * int option
+type notation_applicative_status =
+  | AppBoundedNotation of int
+  | AppUnboundedNotation
+  | NotAppNotation
+
+type notation_rule = interp_rule * interpretation * notation_applicative_status
 
 (** Return the possible notations for a given term *)
 val uninterp_notations : 'a glob_constr_g -> notation_rule list
@@ -245,7 +259,8 @@ val availability_of_notation : specific_notation -> subscopes ->
 
 (** {6 Miscellaneous} *)
 
-val interp_notation_as_global_reference : ?loc:Loc.t -> (GlobRef.t -> bool) ->
+(** If head is true, also allows applied global references. *)
+val interp_notation_as_global_reference : ?loc:Loc.t -> head:bool -> (GlobRef.t -> bool) ->
       notation_key -> delimiters option -> GlobRef.t
 
 (** Checks for already existing notations *)
@@ -264,13 +279,13 @@ type scope_class
 val scope_class_compare : scope_class -> scope_class -> int
 
 val subst_scope_class :
-  Mod_subst.substitution -> scope_class -> scope_class option
+  Environ.env -> Mod_subst.substitution -> scope_class -> scope_class option
 
 val declare_scope_class : scope_name -> scope_class -> unit
 val declare_ref_arguments_scope : Evd.evar_map -> GlobRef.t -> unit
 
-val compute_arguments_scope : Evd.evar_map -> EConstr.types -> scope_name option list
-val compute_type_scope : Evd.evar_map -> EConstr.types -> scope_name option
+val compute_arguments_scope : Environ.env -> Evd.evar_map -> EConstr.types -> scope_name option list
+val compute_type_scope : Environ.env -> Evd.evar_map -> EConstr.types -> scope_name option
 
 (** Get the current scope bound to Sortclass, if it exists *)
 val current_type_scope_name : unit -> scope_name option
@@ -288,8 +303,8 @@ type symbol =
 val symbol_eq : symbol -> symbol -> bool
 
 (** Make/decompose a notation of the form "_ U _" *)
-val make_notation_key : notation_entry_level -> symbol list -> notation
-val decompose_notation_key : notation -> notation_entry_level * symbol list
+val make_notation_key : notation_entry -> symbol list -> notation
+val decompose_notation_key : notation -> notation_entry * symbol list
 
 (** Decompose a notation of the form "a 'U' b" *)
 val decompose_raw_notation : string -> symbol list
@@ -303,8 +318,10 @@ val locate_notation : (glob_constr -> Pp.t) -> notation_key ->
 
 val pr_visibility: (glob_constr -> Pp.t) -> scope_name option -> Pp.t
 
+val make_notation_entry_level : notation_entry -> entry_level -> notation_entry_level
+
 type entry_coercion = (notation_with_optional_scope * notation) list
-val declare_entry_coercion : specific_notation -> notation_entry_level -> unit
+val declare_entry_coercion : specific_notation -> entry_level option -> notation_entry_level -> unit
 val availability_of_entry_coercion : notation_entry_level -> notation_entry_level -> entry_coercion option
 
 val declare_custom_entry_has_global : string -> int -> unit
@@ -312,6 +329,20 @@ val declare_custom_entry_has_ident : string -> int -> unit
 
 val entry_has_global : notation_entry_level -> bool
 val entry_has_ident : notation_entry_level -> bool
+
+(** Dealing with precedences *)
+
+type level = notation_entry * entry_level * entry_relative_level list
+  (* first argument is InCustomEntry s for custom entries *)
+
+val level_eq : level -> level -> bool
+val entry_relative_level_eq : entry_relative_level -> entry_relative_level -> bool
+
+(** {6 Declare and test the level of a (possibly uninterpreted) notation } *)
+
+val declare_notation_level : notation -> level -> unit
+val level_of_notation : notation -> level
+  (** raise [Not_found] if not declared *)
 
 (** Rem: printing rules for primitive token are canonical *)
 

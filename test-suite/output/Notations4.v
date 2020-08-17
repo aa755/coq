@@ -22,6 +22,13 @@ Notation "<< x >>" := x (in custom myconstr at level 3, x custom anotherconstr a
 Notation "# x" := (Some x) (in custom anotherconstr at level 8, x constr at level 9).
 Check [ << # 0 >> ].
 
+(* Now check with global *)
+
+Axiom c : nat.
+Notation "x" := x (in custom myconstr at level 0, x global).
+Check [ b + c ].
+Check fun a => [ a + a ].
+
 End A.
 
 Module B.
@@ -273,3 +280,21 @@ Notation "###" := 0 (at level 0, only parsing, format "###").
 Reserved Notation "##" (at level 0, only parsing, format "##").
 
 End N.
+
+Module O.
+
+Notation U t := (match t with 0 => 0 | S t => t | _ => 0 end).
+Check fun x => U (S x).
+Notation V t := (t,fun t => t).
+Check V tt.
+Check fun x : nat => V x.
+
+End O.
+
+Module Bug12691.
+
+Notation "x :=: y" := True (at level 70, no associativity, only parsing).
+Notation "x :=: y" := (x = y).
+Check (0 :=: 0).
+
+End Bug12691.

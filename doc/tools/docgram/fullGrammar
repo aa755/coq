@@ -451,6 +451,14 @@ bar_cbrace: [
 | test_pipe_closedcurly "|" "}"
 ]
 
+strategy_level: [
+| "expand"
+| "opaque"
+| integer
+| "transparent"
+| strategy_level0
+]
+
 vernac_toplevel: [
 | "Drop" "."
 | "Quit" "."
@@ -524,12 +532,12 @@ command: [
 | "Set" option_table option_setting
 | "Unset" option_table
 | "Print" "Table" option_table
-| "Add" IDENT IDENT LIST1 option_ref_value
-| "Add" IDENT LIST1 option_ref_value
-| "Test" option_table "for" LIST1 option_ref_value
+| "Add" IDENT IDENT LIST1 table_value
+| "Add" IDENT LIST1 table_value
+| "Test" option_table "for" LIST1 table_value
 | "Test" option_table
-| "Remove" IDENT IDENT LIST1 option_ref_value
-| "Remove" IDENT LIST1 option_ref_value
+| "Remove" IDENT IDENT LIST1 table_value
+| "Remove" IDENT LIST1 table_value
 | "Write" "State" IDENT
 | "Write" "State" ne_string
 | "Restore" "State" IDENT
@@ -790,58 +798,7 @@ gallina: [
 ]
 
 register_token: [
-| register_prim_token
-| register_type_token
-]
-
-register_type_token: [
-| "#int63_type"
-| "#float64_type"
-]
-
-register_prim_token: [
-| "#int63_head0"
-| "#int63_tail0"
-| "#int63_add"
-| "#int63_sub"
-| "#int63_mul"
-| "#int63_div"
-| "#int63_mod"
-| "#int63_lsr"
-| "#int63_lsl"
-| "#int63_land"
-| "#int63_lor"
-| "#int63_lxor"
-| "#int63_addc"
-| "#int63_subc"
-| "#int63_addcarryc"
-| "#int63_subcarryc"
-| "#int63_mulc"
-| "#int63_diveucl"
-| "#int63_div21"
-| "#int63_addmuldiv"
-| "#int63_eq"
-| "#int63_lt"
-| "#int63_le"
-| "#int63_compare"
-| "#float64_opp"
-| "#float64_abs"
-| "#float64_eq"
-| "#float64_lt"
-| "#float64_le"
-| "#float64_compare"
-| "#float64_classify"
-| "#float64_add"
-| "#float64_sub"
-| "#float64_mul"
-| "#float64_div"
-| "#float64_sqrt"
-| "#float64_of_int63"
-| "#float64_normfr_mantissa"
-| "#float64_frshiftexp"
-| "#float64_ldshiftexp"
-| "#float64_next_up"
-| "#float64_next_down"
+| test_hash_ident "#" IDENT
 ]
 
 thm_token: [
@@ -1213,13 +1170,6 @@ more_implicits_block: [
 | "{" LIST1 name "}"
 ]
 
-strategy_level: [
-| "expand"
-| "opaque"
-| integer
-| "transparent"
-]
-
 instance_name: [
 | ident_decl binders
 |
@@ -1251,7 +1201,7 @@ query_command: [
 | "SearchHead" constr_pattern in_or_out_modules "."
 | "SearchPattern" constr_pattern in_or_out_modules "."
 | "SearchRewrite" constr_pattern in_or_out_modules "."
-| "Search" searchabout_query searchabout_queries "."
+| "Search" search_query search_queries "."
 ]
 
 printable: [
@@ -1318,7 +1268,7 @@ option_setting: [
 | STRING
 ]
 
-option_ref_value: [
+table_value: [
 | global
 | STRING
 ]
@@ -1348,14 +1298,48 @@ positive_search_mark: [
 |
 ]
 
-searchabout_query: [
-| positive_search_mark ne_string OPT scope_delimiter
-| positive_search_mark constr_pattern
+search_query: [
+| positive_search_mark search_item
+| positive_search_mark "[" LIST1 ( LIST1 search_query ) SEP "|" "]"
 ]
 
-searchabout_queries: [
+search_item: [
+| test_id_colon search_where ":" ne_string OPT scope_delimiter
+| "is" ":" logical_kind
+| ne_string OPT scope_delimiter
+| test_id_colon search_where ":" constr_pattern
+| constr_pattern
+]
+
+logical_kind: [
+| thm_token
+| assumption_token
+| "Context"
+| extended_def_token
+| "Primitive"
+]
+
+extended_def_token: [
+| def_token
+| "Coercion"
+| "Instance"
+| "Scheme"
+| "Canonical"
+| "Field"
+| "Method"
+]
+
+search_where: [
+| "head"
+| "hyp"
+| "concl"
+| "headhyp"
+| "headconcl"
+]
+
+search_queries: [
 | ne_in_or_out_modules
-| searchabout_query searchabout_queries
+| search_query search_queries
 |
 ]
 
@@ -1441,7 +1425,7 @@ simple_tactic: [
 | "firstorder" OPT tactic firstorder_using "with" LIST1 preident
 | "gintuition" OPT tactic
 | "functional" "inversion" quantified_hypothesis OPT reference      (* funind plugin *)
-| "functional" "induction" LIST1 constr fun_ind_using with_names      (* funind plugin *)
+| "functional" "induction" lconstr fun_ind_using with_names      (* funind plugin *)
 | "soft" "functional" "induction" LIST1 constr fun_ind_using with_names      (* funind plugin *)
 | "reflexivity"
 | "exact" casted_constr
@@ -1598,6 +1582,7 @@ simple_tactic: [
 | "guard" test
 | "decompose" "[" LIST1 constr "]" constr
 | "optimize_heap"
+| "with_strategy" strategy_level_or_var "[" LIST1 smart_global "]" tactic3
 | "eassumption"
 | "eexact" constr
 | "trivial" auto_using hintbases
@@ -1606,7 +1591,6 @@ simple_tactic: [
 | "auto" OPT int_or_var auto_using hintbases
 | "info_auto" OPT int_or_var auto_using hintbases
 | "debug" "auto" OPT int_or_var auto_using hintbases
-| "prolog" "[" LIST0 uconstr "]" int_or_var
 | "eauto" OPT int_or_var OPT int_or_var auto_using hintbases
 | "new" "auto" OPT int_or_var auto_using hintbases
 | "debug" "eauto" OPT int_or_var OPT int_or_var auto_using hintbases
@@ -1855,6 +1839,11 @@ test_lpar_id_colon: [
 | local_test_lpar_id_colon
 ]
 
+strategy_level_or_var: [
+| strategy_level
+| identref
+]
+
 comparison: [
 | "="
 | "<"
@@ -1903,9 +1892,13 @@ debug: [
 |
 ]
 
+eauto_search_strategy_name: [
+| "bfs"
+| "dfs"
+]
+
 eauto_search_strategy: [
-| "(bfs)"
-| "(dfs)"
+| "(" eauto_search_strategy_name ")"
 |
 ]
 

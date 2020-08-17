@@ -636,8 +636,8 @@ let map_constr_with_binders_left_to_right sigma g f l c =
       if b' == b then c
       else mkProj (p, b')
   | Evar (e,al) ->
-    let al' = Array.map_left (f l) al in
-      if Array.for_all2 (==) al' al then c
+    let al' = List.map_left (f l) al in
+      if List.for_all2 (==) al' al then c
       else mkEvar (e, al')
   | Case (ci,p,b,bl) ->
       (* In v8 concrete syntax, predicate is after the term to match! *)
@@ -707,8 +707,8 @@ let map_constr_with_full_binders_gen userview sigma g f l cstr =
       let c' = f l c in
         if c' == c then cstr else mkProj (p, c')
   | Evar (e,al) ->
-      let al' = Array.map (f l) al in
-      if Array.for_all2 (==) al al' then cstr else mkEvar (e, al')
+      let al' = List.map (f l) al in
+      if List.for_all2 (==) al al' then cstr else mkEvar (e, al')
   | Case (ci,p,c,bl) when userview ->
       let p' = map_return_predicate_with_full_binders sigma g f l ci p in
       let c' = f l c in
@@ -803,23 +803,29 @@ let occur_evar sigma n c =
 
 let occur_in_global env id constr =
   let vars = vars_of_global env constr in
-  if Id.Set.mem id vars then raise Occur
+  Id.Set.mem id vars
 
 let occur_var env sigma id c =
   let rec occur_rec c =
     match EConstr.destRef sigma c with
-    | gr, _ -> occur_in_global env id gr
+    | gr, _ -> if occur_in_global env id gr then raise Occur
     | exception DestKO -> EConstr.iter sigma occur_rec c
   in
   try occur_rec c; false with Occur -> true
 
+exception OccurInGlobal of GlobRef.t
+
+let occur_var_indirectly env sigma id c =
+  let var = GlobRef.VarRef id in
+  let rec occur_rec c =
+    match EConstr.destRef sigma c with
+    | gr, _ -> if not (GlobRef.equal gr var) && occur_in_global env id gr then raise (OccurInGlobal gr)
+    | exception DestKO -> EConstr.iter sigma occur_rec c
+  in
+  try occur_rec c; None with OccurInGlobal gr -> Some gr
+
 let occur_var_in_decl env sigma hyp decl =
-  let open NamedDecl in
-  match decl with
-    | LocalAssum (_,typ) -> occur_var env sigma hyp typ
-    | LocalDef (_, body, typ) ->
-        occur_var env sigma hyp typ ||
-        occur_var env sigma hyp body
+  NamedDecl.exists (occur_var env sigma hyp) decl
 
 let local_occur_var sigma id c =
   let rec occur c = match EConstr.kind sigma c with
@@ -827,6 +833,9 @@ let local_occur_var sigma id c =
   | _ -> EConstr.iter sigma occur c
   in
   try occur c; false with Occur -> true
+
+let local_occur_var_in_decl sigma hyp decl =
+  NamedDecl.exists (local_occur_var sigma hyp) decl
 
   (* returns the list of free debruijn indices in a term *)
 

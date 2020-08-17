@@ -1,4 +1,4 @@
-# CACHEKEY: "bionic_coq-V2020-03-13-V69"
+# CACHEKEY: "bionic_coq-v8.12-V2020-06-05-V1"
 # ^^ Update when modifying this file.
 
 FROM ubuntu:bionic
@@ -13,13 +13,13 @@ RUN apt-get update -qq && apt-get install --no-install-recommends -y -qq \
         libgtksourceview-3.0-dev \
         # Dependencies of stdlib and sphinx doc
         texlive-latex-extra texlive-fonts-recommended texlive-xetex latexmk \
-        xindy python3-pip python3-setuptools python3-pexpect python3-bs4 \
+        python3-pip python3-setuptools python3-pexpect python3-bs4 fonts-freefont-otf \
         # Dependencies of source-doc and coq-makefile
         texlive-science tipa
 
 # More dependencies of the sphinx doc
-RUN pip3 install sphinx==1.8.0 sphinx_rtd_theme==0.2.5b2 \
-                 antlr4-python3-runtime==4.7.1 sphinxcontrib-bibtex==0.4.0
+RUN pip3 install sphinx==2.3.1 sphinx_rtd_theme==0.4.3 \
+                 antlr4-python3-runtime==4.7.1 sphinxcontrib-bibtex==0.4.2
 
 # We need to install OPAM 2.0 manually for now.
 RUN wget https://github.com/ocaml/opam/releases/download/2.0.6/opam-2.0.6-x86_64-linux -O /usr/bin/opam && chmod 755 /usr/bin/opam
@@ -39,7 +39,7 @@ ENV COMPILER="4.05.0"
 # with the compiler version.
 ENV BASE_OPAM="num ocamlfind.1.8.1 ounit.2.2.2 odoc.1.5.0" \
     CI_OPAM="menhir.20190626 ocamlgraph.1.8.8" \
-    BASE_ONLY_OPAM="elpi.1.10.2"
+    BASE_ONLY_OPAM="elpi.1.11.0"
 
 # BASE switch; CI_OPAM contains Coq's CI dependencies.
 ENV COQIDE_OPAM="cairo2.0.6.1 lablgtk3-sourceview3.3.1.0"

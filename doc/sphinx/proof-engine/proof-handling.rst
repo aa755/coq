@@ -90,9 +90,7 @@ list of assertion commands is given in :ref:`Assertions`. The command
 .. cmd:: Save @ident
    :name: Save
 
-   Forces the name of the original goal to be :token:`ident`. This
-   command can only be used if the original goal
-   was opened using the :cmd:`Goal` command.
+   Saves a completed proof with the name :token:`ident`.
 
 .. cmd:: Admitted
 
@@ -126,6 +124,15 @@ list of assertion commands is given in :ref:`Assertions`. The command
    :n:`exact @term. Qed.`
    That is, you have to give the full proof in one gulp, as a
    proof term (see Section :ref:`applyingtheorems`).
+
+   .. warning::
+
+      Use of this command is discouraged.  In particular, it
+      doesn't work in Proof General because it must
+      immediately follow the command that opened proof mode, but
+      Proof General inserts :cmd:`Unset` :flag:`Silent` before it (see
+      `Proof General issue #498
+      <https://github.com/ProofGeneral/PG/issues/498>`_).
 
 .. cmd:: Proof
 
@@ -821,7 +828,7 @@ in compacted hypotheses:
 ..
 
   .. image:: ../_static/diffs-coqide-compacted.png
-     :alt: coqide with Set Diffs on with compacted hyptotheses
+     :alt: coqide with Set Diffs on with compacted hypotheses
 
 Controlling the effect of proof editing commands
 ------------------------------------------------
@@ -851,19 +858,28 @@ Controlling the effect of proof editing commands
 Controlling memory usage
 ------------------------
 
+.. cmd:: Print Debug GC
+
+   Prints heap usage statistics, which are values from the `stat` type of the `Gc` module
+   described
+   `here <https://caml.inria.fr/pub/docs/manual-ocaml/libref/Gc.html#TYPEstat>`_
+   in the OCaml documentation.
+   The `live_words`, `heap_words` and `top_heap_words` values give the basic information.
+   Words are 8 bytes or 4 bytes, respectively, for 64- and 32-bit executables.
+
 When experiencing high memory usage the following commands can be used
 to force |Coq| to optimize some of its internal data structures.
 
-
 .. cmd:: Optimize Proof
 
-   This command forces |Coq| to shrink the data structure used to represent
-   the ongoing proof.
+   Shrink the data structure used to represent the current proof.
 
 
 .. cmd:: Optimize Heap
 
-   This command forces the |OCaml| runtime to perform a heap compaction.
-   This is in general an expensive operation.
-   See: `OCaml Gc <http://caml.inria.fr/pub/docs/manual-ocaml/libref/Gc.html#VALcompact>`_
+   Perform a heap compaction.  This is generally an expensive operation.
+   See: `OCaml Gc.compact <http://caml.inria.fr/pub/docs/manual-ocaml/libref/Gc.html#VALcompact>`_
    There is also an analogous tactic :tacn:`optimize_heap`.
+
+Memory usage parameters can be set through the :ref:`OCAMLRUNPARAM <OCAMLRUNPARAM>`
+environment variable.

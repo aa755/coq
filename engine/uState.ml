@@ -34,12 +34,12 @@ type t =
    (** The subset of unification variables that can be instantiated with
         algebraic universes as they appear in inferred types only. *)
    uctx_universes : UGraph.t; (** The current graph extended with the local constraints *)
-   uctx_universes_lbound : Univ.Level.t; (** The lower bound on universes (e.g. Set or Prop) *)
+   uctx_universes_lbound : UGraph.Bound.t; (** The lower bound on universes (e.g. Set or Prop) *)
    uctx_initial_universes : UGraph.t; (** The graph at the creation of the evar_map *)
    uctx_weak_constraints : UPairSet.t
  }
 
-let initial_sprop_cumulative = UGraph.make_sprop_cumulative UGraph.initial_universes
+let initial_sprop_cumulative = UGraph.set_cumulative_sprop true UGraph.initial_universes
 
 let empty =
   { uctx_names = UNameMap.empty, LMap.empty;
@@ -48,7 +48,7 @@ let empty =
     uctx_univ_variables = LMap.empty;
     uctx_univ_algebraic = LSet.empty;
     uctx_universes = initial_sprop_cumulative;
-    uctx_universes_lbound = Univ.Level.set;
+    uctx_universes_lbound = UGraph.Bound.Set;
     uctx_initial_universes = initial_sprop_cumulative;
     uctx_weak_constraints = UPairSet.empty; }
 
@@ -57,11 +57,11 @@ let elaboration_sprop_cumul =
     ~key:["Elaboration";"StrictProp";"Cumulativity"] ~value:true
 
 let make ~lbound u =
-  let u = if elaboration_sprop_cumul () then UGraph.make_sprop_cumulative u else u in
-    { empty with
-      uctx_universes = u;
-      uctx_universes_lbound = lbound;
-      uctx_initial_universes = u}
+  let u = UGraph.set_cumulative_sprop (elaboration_sprop_cumul ()) u in
+  { empty with
+    uctx_universes = u;
+    uctx_universes_lbound = lbound;
+    uctx_initial_universes = u}
 
 let is_empty ctx =
   ContextSet.is_empty ctx.uctx_local &&
@@ -443,6 +443,10 @@ let check_univ_decl ~poly uctx decl =
       (ContextSet.constraints uctx.uctx_local);
   ctx
 
+let is_bound l lbound = match lbound with
+| UGraph.Bound.Prop -> Level.is_prop l
+| UGraph.Bound.Set -> Level.is_set l
+
 let restrict_universe_context ~lbound (univs, csts) keep =
   let removed = LSet.diff univs keep in
   if LSet.is_empty removed then univs, csts
@@ -455,7 +459,7 @@ let restrict_universe_context ~lbound (univs, csts) keep =
   let allkept = LSet.union (UGraph.domain UGraph.initial_universes) (LSet.diff allunivs removed) in
   let csts = UGraph.constraints_for ~kept:allkept g in
   let csts = Constraint.filter (fun (l,d,r) ->
-      not ((Level.equal l lbound && d == Le) || (Level.is_prop l && d == Lt && Level.is_set r))) csts in
+      not ((is_bound l lbound && d == Le) || (Level.is_prop l && d == Lt && Level.is_set r))) csts in
   (LSet.inter univs keep, csts)
 
 let restrict ctx vars =
@@ -527,6 +531,14 @@ let demote_seff_univs univs uctx =
   let seff = LSet.union uctx.uctx_seff_univs univs in
   { uctx with uctx_seff_univs = seff }
 
+let demote_global_univs env uctx =
+  let env_ugraph = Environ.universes env in
+  let global_univs = UGraph.domain env_ugraph in
+  let global_constraints, _ = UGraph.constraints_of_universes env_ugraph in
+  let promoted_uctx =
+    ContextSet.(of_set global_univs |> add_constraints global_constraints) in
+  { uctx with uctx_local = ContextSet.diff uctx.uctx_local promoted_uctx }
+
 let merge_seff uctx ctx' =
   let levels = ContextSet.levels ctx' in
   let declare g =
@@ -547,10 +559,11 @@ let emit_side_effects eff u =
   merge_seff u uctx
 
 let update_sigma_env uctx env =
-  let univs = UGraph.make_sprop_cumulative (Environ.universes env) in
+  let univs = UGraph.set_cumulative_sprop (elaboration_sprop_cumul()) (Environ.universes env) in
   let eunivs =
-    { uctx with uctx_initial_universes = univs;
-                uctx_universes = univs }
+    { uctx with
+      uctx_initial_universes = univs;
+      uctx_universes = univs }
   in
   merge_seff eunivs eunivs.uctx_local
 
@@ -591,10 +604,10 @@ let make_with_initial_binders ~lbound e us =
 
 let add_global_univ uctx u =
   let initial =
-    UGraph.add_universe ~lbound:Univ.Level.set ~strict:true u uctx.uctx_initial_universes
+    UGraph.add_universe ~lbound:UGraph.Bound.Set ~strict:true u uctx.uctx_initial_universes
   in
   let univs =
-    UGraph.add_universe ~lbound:Univ.Level.set ~strict:true u uctx.uctx_universes
+    UGraph.add_universe ~lbound:UGraph.Bound.Set ~strict:true u uctx.uctx_universes
   in
   { uctx with uctx_local = ContextSet.add_universe u uctx.uctx_local;
                                      uctx_initial_universes = initial;

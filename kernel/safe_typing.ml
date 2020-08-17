@@ -113,11 +113,23 @@ type library_info = DirPath.t * vodigest
 (** Functor and funsig parameters, most recent first *)
 type module_parameters = (MBId.t * module_type_body) list
 
+type compiled_library = {
+  comp_name : DirPath.t;
+  comp_mod : module_body;
+  comp_univs : Univ.ContextSet.t;
+  comp_deps : library_info array;
+  comp_enga : engagement;
+  comp_natsymbs : Nativevalues.symbols
+}
+
+type reimport = compiled_library * Univ.ContextSet.t * vodigest
+
 (** Part of the safe_env at a section opening time to be backtracked *)
 type section_data = {
   rev_env : Environ.env;
   rev_univ : Univ.ContextSet.t;
   rev_objlabels : Label.Set.t;
+  rev_reimport : reimport list;
 }
 
 type safe_environment =
@@ -231,8 +243,6 @@ let set_VM b senv =
 let set_native_compiler b senv =
   let flags = Environ.typing_flags senv.env in
   set_typing_flags { flags with enable_native_compiler = b } senv
-
-let make_sprop_cumulative senv = { senv with env = Environ.make_sprop_cumulative senv.env }
 
 let set_allow_sprop b senv = { senv with env = Environ.set_allow_sprop b senv.env }
 
@@ -555,8 +565,7 @@ let constraints_of_sfb sfb =
   match sfb with
   | SFBconst cb -> globalize_constant_universes cb
   | SFBmind mib -> globalize_mind_universes mib
-  | SFBmodtype mtb -> [mtb.mod_constraints]
-  | SFBmodule mb -> [mb.mod_constraints]
+  | SFBmodtype _ | SFBmodule _ -> []
 
 let add_retroknowledge pttc senv =
   { senv with
@@ -975,103 +984,35 @@ let add_mind l mie senv =
 
 let add_modtype l params_mte inl senv =
   let mp = MPdot(senv.modpath, l) in
-  let mtb = Mod_typing.translate_modtype senv.env mp inl params_mte  in
+  let mtb, cst = Mod_typing.translate_modtype senv.env mp inl params_mte  in
+  let senv = push_context_set ~strict:true (Univ.LSet.empty,cst) senv in
   let mtb = Declareops.hcons_module_type mtb in
-  let senv' = add_field (l,SFBmodtype mtb) MT senv in
-  mp, senv'
+  let senv = add_field (l,SFBmodtype mtb) MT senv in
+  mp, senv
 
 (** full_add_module adds module with universes and constraints *)
 
 let full_add_module mb senv =
-  let senv = add_constraints (Now mb.mod_constraints) senv in
   let dp = ModPath.dp mb.mod_mp in
   let linkinfo = Nativecode.link_info_of_dirpath dp in
   { senv with env = Modops.add_linked_module mb linkinfo senv.env }
 
 let full_add_module_type mp mt senv =
-  let senv = add_constraints (Now mt.mod_constraints) senv in
   { senv with env = Modops.add_module_type mp mt senv.env }
 
 (** Insertion of modules *)
 
 let add_module l me inl senv =
   let mp = MPdot(senv.modpath, l) in
-  let mb = Mod_typing.translate_module senv.env mp inl me in
+  let mb, cst = Mod_typing.translate_module senv.env mp inl me in
+  let senv = push_context_set ~strict:true (Univ.LSet.empty,cst) senv in
   let mb = Declareops.hcons_module_body mb in
-  let senv' = add_field (l,SFBmodule mb) M senv in
-  let senv'' =
-    if Modops.is_functor mb.mod_type then senv'
-    else update_resolver (Mod_subst.add_delta_resolver mb.mod_delta) senv'
+  let senv = add_field (l,SFBmodule mb) M senv in
+  let senv =
+    if Modops.is_functor mb.mod_type then senv
+    else update_resolver (Mod_subst.add_delta_resolver mb.mod_delta) senv
   in
-  (mp,mb.mod_delta),senv''
-
-(** {6 Interactive sections *)
-
-let open_section senv =
-  let custom = {
-    rev_env = senv.env;
-    rev_univ = senv.univ;
-    rev_objlabels = senv.objlabels;
-  } in
-  let sections = Section.open_section ~custom senv.sections in
-  { senv with sections=Some sections }
-
-let close_section senv =
-  let open Section in
-  let sections0 = get_section senv.sections in
-  let env0 = senv.env in
-  (* First phase: revert the declarations added in the section *)
-  let sections, entries, cstrs, revert = Section.close_section sections0 in
-  let rec pop_revstruct accu entries revstruct = match entries, revstruct with
-  | [], revstruct -> accu, revstruct
-  | _ :: _, [] ->
-    CErrors.anomaly (Pp.str "Unmatched section data")
-  | entry :: entries, (lbl, leaf) :: revstruct ->
-    let data = match entry, leaf with
-    | SecDefinition kn, SFBconst cb ->
-      let () = assert (Label.equal lbl (Constant.label kn)) in
-      `Definition (kn, cb)
-    | SecInductive ind, SFBmind mib ->
-      let () = assert (Label.equal lbl (MutInd.label ind)) in
-      `Inductive (ind, mib)
-    | (SecDefinition _ | SecInductive _), (SFBconst _ | SFBmind _) ->
-      CErrors.anomaly (Pp.str "Section content mismatch")
-    | (SecDefinition _ | SecInductive _), (SFBmodule _ | SFBmodtype _) ->
-      CErrors.anomaly (Pp.str "Module inside a section")
-    in
-    pop_revstruct (data :: accu) entries revstruct
-  in
-  let redo, revstruct = pop_revstruct [] entries senv.revstruct in
-  (* Don't revert the delayed constraints. If some delayed constraints were
-     forced inside the section, they have been turned into global monomorphic
-     that are going to be replayed. Those that are not forced are not readded
-     by {!add_constant_aux}. *)
-  let { rev_env = env; rev_univ = univ; rev_objlabels = objlabels } = revert in
-  (* Do not revert the opaque table, the discharged opaque constants are
-     referring to it. *)
-  let env = Environ.set_opaque_tables env (Environ.opaque_tables senv.env) in
-  let senv = { senv with env; revstruct; sections; univ; objlabels; } in
-  (* Second phase: replay the discharged section contents *)
-  let senv = push_context_set ~strict:true cstrs senv in
-  let modlist = Section.replacement_context env0 sections0 in
-  let cooking_info seg =
-    let { abstr_ctx; abstr_subst; abstr_uctx } = seg in
-    let abstract = (abstr_ctx, abstr_subst, abstr_uctx) in
-    { Opaqueproof.modlist; abstract }
-  in
-  let fold senv = function
-  | `Definition (kn, cb) ->
-    let info = cooking_info (Section.segment_of_constant env0 kn sections0) in
-    let r = { Cooking.from = cb; info } in
-    let cb = Term_typing.translate_recipe senv.env kn r in
-    (* Delayed constants are already in the global environment *)
-    add_constant_aux senv (kn, cb)
-  | `Inductive (ind, mib) ->
-    let info = cooking_info (Section.segment_of_inductive env0 ind sections0) in
-    let mib = Cooking.cook_inductive info mib in
-    add_checked_mind ind mib senv
-  in
-  List.fold_left fold senv redo
+  (mp,mb.mod_delta),senv
 
 (** {6 Starting / ending interactive modules and module types } *)
 
@@ -1103,7 +1044,8 @@ let start_modtype l senv =
 let add_module_parameter mbid mte inl senv =
   let () = check_empty_struct senv in
   let mp = MPbound mbid in
-  let mtb = Mod_typing.translate_modtype senv.env mp inl ([],mte) in
+  let mtb, cst = Mod_typing.translate_modtype senv.env mp inl ([],mte) in
+  let senv = push_context_set ~strict:true (Univ.LSet.empty,cst) senv in
   let senv = full_add_module_type mp mtb senv in
   let new_variant = match senv.modvariant with
     | STRUCT (params,oldenv) -> STRUCT ((mbid,mtb) :: params, oldenv)
@@ -1141,12 +1083,12 @@ let functorize_module params mb =
 let build_module_body params restype senv =
   let struc = NoFunctor (List.rev senv.revstruct) in
   let restype' = Option.map (fun (ty,inl) -> (([],ty),inl)) restype in
-  let mb =
+  let mb, cst =
     Mod_typing.finalize_module senv.env senv.modpath
-      (struc,None,senv.modresolver,senv.univ) restype'
+      (struc,None,senv.modresolver,Univ.Constraint.empty) restype'
   in
   let mb' = functorize_module params mb in
-  { mb' with mod_retroknowledge = ModBodyRK senv.local_retroknowledge }
+  { mb' with mod_retroknowledge = ModBodyRK senv.local_retroknowledge }, cst
 
 (** Returning back to the old pre-interactive-module environment,
     with one extra component and some updated fields
@@ -1186,15 +1128,13 @@ let end_module l restype senv =
   let () = check_current_label l mp in
   let () = check_empty_context senv in
   let mbids = List.rev_map fst params in
-  let mb = build_module_body params restype senv in
+  let mb, cst = build_module_body params restype senv in
+  let senv = push_context_set ~strict:true (Univ.LSet.empty,cst) senv in
   let newenv = Environ.set_opaque_tables oldsenv.env (Environ.opaque_tables senv.env) in
   let newenv = Environ.set_native_symbols newenv senv.env.Environ.native_symbols in
   let newenv = set_engagement_opt newenv senv.engagement in
-  let senv'=
-    propagate_loads { senv with
-      env = newenv;
-      univ = Univ.ContextSet.union senv.univ mb.mod_constraints} in
-  let newenv = Environ.push_context_set ~strict:true mb.mod_constraints senv'.env in
+  let newenv = Environ.set_universes (Environ.universes senv.env) newenv in
+  let senv' = propagate_loads { senv with env = newenv } in
   let newenv = Modops.add_module mb newenv in
   let newresolver =
     if Modops.is_functor mb.mod_type then oldsenv.modresolver
@@ -1203,12 +1143,11 @@ let end_module l restype senv =
   (mp,mbids,mb.mod_delta),
   propagate_senv (l,SFBmodule mb) newenv newresolver senv' oldsenv
 
-let build_mtb mp sign cst delta =
+let build_mtb mp sign delta =
   { mod_mp = mp;
     mod_expr = ();
     mod_type = sign;
     mod_type_alg = None;
-    mod_constraints = cst;
     mod_delta = delta;
     mod_retroknowledge = ModTypeRK }
 
@@ -1220,11 +1159,11 @@ let end_modtype l senv =
   let mbids = List.rev_map fst params in
   let newenv = Environ.set_opaque_tables oldsenv.env (Environ.opaque_tables senv.env) in
   let newenv = Environ.set_native_symbols newenv senv.env.Environ.native_symbols in
-  let newenv = Environ.push_context_set ~strict:true senv.univ newenv in
   let newenv = set_engagement_opt newenv senv.engagement in
+  let newenv = Environ.set_universes (Environ.universes senv.env) newenv in
   let senv' = propagate_loads {senv with env=newenv} in
   let auto_tb = functorize params (NoFunctor (List.rev senv.revstruct)) in
-  let mtb = build_mtb mp auto_tb senv'.univ senv.modresolver in
+  let mtb = build_mtb mp auto_tb senv.modresolver in
   let newenv = Environ.add_modtype mtb senv'.env in
   let newresolver = oldsenv.modresolver in
   (mp,mbids),
@@ -1238,7 +1177,7 @@ let add_include me is_module inl senv =
   let sign,(),resolver,cst =
     translate_mse_incl is_module senv.env mp_sup inl me
   in
-  let senv = add_constraints (Now cst) senv in
+  let senv = push_context_set ~strict:true (Univ.LSet.empty,cst) senv in
   (* Include Self support  *)
   let rec compute_sign sign mb resolver senv =
     match sign with
@@ -1258,7 +1197,7 @@ let add_include me is_module inl senv =
   in
   let resolver,str,senv =
     let struc = NoFunctor (List.rev senv.revstruct) in
-    let mtb = build_mtb mp_sup struc Univ.ContextSet.empty senv.modresolver in
+    let mtb = build_mtb mp_sup struc senv.modresolver in
     compute_sign sign mtb resolver senv
   in
   let senv = update_resolver (Mod_subst.add_delta_resolver resolver) senv
@@ -1278,15 +1217,9 @@ let add_include me is_module inl senv =
 
 (** {6 Libraries, i.e. compiled modules } *)
 
-type compiled_library = {
-  comp_name : DirPath.t;
-  comp_mod : module_body;
-  comp_deps : library_info array;
-  comp_enga : engagement;
-  comp_natsymbs : Nativevalues.symbols
-}
-
 let module_of_library lib = lib.comp_mod
+
+let univs_of_library lib = lib.comp_univs
 
 type native_library = Nativecode.global list
 
@@ -1316,7 +1249,6 @@ let export ?except ~output_native_objects senv dir =
       mod_expr = FullStruct;
       mod_type = str;
       mod_type_alg = None;
-      mod_constraints = senv.univ;
       mod_delta = senv.modresolver;
       mod_retroknowledge = ModBodyRK senv.local_retroknowledge
     }
@@ -1329,6 +1261,7 @@ let export ?except ~output_native_objects senv dir =
   let lib = {
     comp_name = dir;
     comp_mod = mb;
+    comp_univs = senv.univ;
     comp_deps = Array.of_list (DPmap.bindings senv.required);
     comp_enga = Environ.engagement senv.env;
     comp_natsymbs = symbols }
@@ -1336,7 +1269,7 @@ let export ?except ~output_native_objects senv dir =
   mp, lib, ast
 
 (* cst are the constraints that were computed by the vi2vo step and hence are
- * not part of the mb.mod_constraints field (but morally should be) *)
+ * not part of the [lib.comp_univs] field (but morally should be) *)
 let import lib cst vodigest senv =
   check_required senv.required lib.comp_deps;
   check_engagement senv.env lib.comp_enga;
@@ -1346,21 +1279,100 @@ let import lib cst vodigest senv =
   let mp = MPfile lib.comp_name in
   let mb = lib.comp_mod in
   let env = Environ.push_context_set ~strict:true
-                                     (Univ.ContextSet.union mb.mod_constraints cst)
-                                     senv.env
+      (Univ.ContextSet.union lib.comp_univs cst)
+      senv.env
   in
   let env =
     let linkinfo = Nativecode.link_info_of_dirpath lib.comp_name in
     Modops.add_linked_module mb linkinfo env
   in
   let env = Environ.add_native_symbols lib.comp_name lib.comp_natsymbs env in
+  let sections =
+    Option.map (Section.map_custom (fun custom ->
+        {custom with rev_reimport = (lib,cst,vodigest) :: custom.rev_reimport}))
+      senv.sections
+  in
   mp,
   { senv with
     env;
     modresolver = Mod_subst.add_delta_resolver mb.mod_delta senv.modresolver;
     required = DPmap.add lib.comp_name vodigest senv.required;
     loads = (mp,mb)::senv.loads;
+    sections;
   }
+
+(** {6 Interactive sections *)
+
+let open_section senv =
+  let custom = {
+    rev_env = senv.env;
+    rev_univ = senv.univ;
+    rev_objlabels = senv.objlabels;
+    rev_reimport = [];
+  } in
+  let sections = Section.open_section ~custom senv.sections in
+  { senv with sections=Some sections }
+
+let close_section senv =
+  let open Section in
+  let sections0 = get_section senv.sections in
+  let env0 = senv.env in
+  (* First phase: revert the declarations added in the section *)
+  let sections, entries, cstrs, revert = Section.close_section sections0 in
+  let rec pop_revstruct accu entries revstruct = match entries, revstruct with
+  | [], revstruct -> accu, revstruct
+  | _ :: _, [] ->
+    CErrors.anomaly (Pp.str "Unmatched section data")
+  | entry :: entries, (lbl, leaf) :: revstruct ->
+    let data = match entry, leaf with
+    | SecDefinition kn, SFBconst cb ->
+      let () = assert (Label.equal lbl (Constant.label kn)) in
+      `Definition (kn, cb)
+    | SecInductive ind, SFBmind mib ->
+      let () = assert (Label.equal lbl (MutInd.label ind)) in
+      `Inductive (ind, mib)
+    | (SecDefinition _ | SecInductive _), (SFBconst _ | SFBmind _) ->
+      CErrors.anomaly (Pp.str "Section content mismatch")
+    | (SecDefinition _ | SecInductive _), (SFBmodule _ | SFBmodtype _) ->
+      CErrors.anomaly (Pp.str "Module inside a section")
+    in
+    pop_revstruct (data :: accu) entries revstruct
+  in
+  let redo, revstruct = pop_revstruct [] entries senv.revstruct in
+  (* Don't revert the delayed constraints. If some delayed constraints were
+     forced inside the section, they have been turned into global monomorphic
+     that are going to be replayed. Those that are not forced are not readded
+     by {!add_constant_aux}. *)
+  let { rev_env = env; rev_univ = univ; rev_objlabels = objlabels; rev_reimport } = revert in
+  (* Do not revert the opaque table, the discharged opaque constants are
+     referring to it. *)
+  let env = Environ.set_opaque_tables env (Environ.opaque_tables senv.env) in
+  let senv = { senv with env; revstruct; sections; univ; objlabels; } in
+  (* Second phase: replay Requires *)
+  let senv = List.fold_left (fun senv (lib,cst,vodigest) -> snd (import lib cst vodigest senv))
+      senv (List.rev rev_reimport)
+  in
+  (* Third phase: replay the discharged section contents *)
+  let senv = push_context_set ~strict:true cstrs senv in
+  let modlist = Section.replacement_context env0 sections0 in
+  let cooking_info seg =
+    let { abstr_ctx; abstr_subst; abstr_uctx } = seg in
+    let abstract = (abstr_ctx, abstr_subst, abstr_uctx) in
+    { Opaqueproof.modlist; abstract }
+  in
+  let fold senv = function
+  | `Definition (kn, cb) ->
+    let info = cooking_info (Section.segment_of_constant env0 kn sections0) in
+    let r = { Cooking.from = cb; info } in
+    let cb = Term_typing.translate_recipe senv.env kn r in
+    (* Delayed constants are already in the global environment *)
+    add_constant_aux senv (kn, cb)
+  | `Inductive (ind, mib) ->
+    let info = cooking_info (Section.segment_of_inductive env0 ind sections0) in
+    let mib = Cooking.cook_inductive info mib in
+    add_checked_mind ind mib senv
+  in
+  List.fold_left fold senv redo
 
 (** {6 Safe typing } *)
 

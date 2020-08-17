@@ -70,7 +70,7 @@ is said *contextual* if it can be inferred only from the knowledge of
 the type of the context of the current expression. For instance, the
 only argument of::
 
-  nil : forall A:Set, list A`
+  nil : forall A:Set, list A
 
 is contextual. Similarly, both arguments of a term of type::
 
@@ -105,28 +105,26 @@ This corresponds to a class of non-dependent implicit arguments that
 are solved based on the structure of their type only.
 
 
-Maximal or non maximal insertion of implicit arguments
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Maximal and non-maximal insertion of implicit arguments
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In case a function is partially applied, and the next argument to be
-applied is an implicit argument, two disciplines are applicable. In
-the first case, the function is considered to have no arguments
-furtherly: one says that the implicit argument is not maximally
-inserted. In the second case, the function is considered to be
-implicitly applied to the implicit arguments it is waiting for: one
-says that the implicit argument is maximally inserted.
+When a function is partially applied and the next argument to
+apply is an implicit argument, the application can be interpreted in two ways.
+If the next argument is declared as *maximally inserted*, the partial
+application will include that argument.  Otherwise, the argument is
+*non-maximally inserted* and the partial application will not include that argument.
 
 Each implicit argument can be declared to be inserted maximally or non
-maximally. In Coq, maximally-inserted implicit arguments are written between curly braces
-"{ }" and non-maximally-inserted implicit arguments are written in square brackets "[ ]".
+maximally. In Coq, maximally inserted implicit arguments are written between curly braces
+"{ }" and non-maximally inserted implicit arguments are written in square brackets "[ ]".
 
 .. seealso:: :flag:`Maximal Implicit Insertion`
 
 Trailing Implicit Arguments
 +++++++++++++++++++++++++++
 
-An implicit argument is considered trailing when all following arguments are declared
-implicit. Trailing implicit arguments cannot be declared non maximally inserted,
+An implicit argument is considered *trailing* when all following arguments are
+implicit. Trailing implicit arguments must be declared as maximally inserted;
 otherwise they would never be inserted.
 
 .. exn:: Argument @name is a trailing implicit, so it can't be declared non maximal. Please use %{ %} instead of [ ].
@@ -141,10 +139,9 @@ otherwise they would never be inserted.
 Casual use of implicit arguments
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In a given expression, if it is clear that some argument of a function
-can be inferred from the type of the other arguments, the user can
-force the given argument to be guessed by replacing it by “_”. If
-possible, the correct argument will be automatically generated.
+If an argument of a function application can be inferred from the type
+of the other arguments, the user can force inference of the argument
+by replacing it with `_`.
 
 .. exn:: Cannot infer a term for this placeholder.
    :name: Cannot infer a term for this placeholder. (Casual use of implicit arguments)
@@ -156,12 +153,8 @@ possible, the correct argument will be automatically generated.
 Declaration of implicit arguments
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-In case one wants that some arguments of a given object (constant,
-inductive types, constructors, assumptions, local or not) are always
-inferred by |Coq|, one may declare once and for all which are the
-expected implicit arguments of this object. There are two ways to do
-this, *a priori* and *a posteriori*.
-
+Implicit arguments can be declared when a function is declared or
+afterwards, using the :cmd:`Arguments` command.
 
 Implicit Argument Binders
 +++++++++++++++++++++++++
@@ -172,18 +165,20 @@ Implicit Argument Binders
    implicit_binders ::= %{ {+ @name } {? : @type } %}
    | [ {+ @name } {? : @type } ]
 
-In the first setting, one wants to explicitly give the implicit
-arguments of a declared object as part of its definition. To do this,
-one has to surround the bindings of implicit arguments by curly
-braces or square braces:
+In the context of a function definition, these forms specify that
+:token:`name` is an implicit argument.  The first form, with curly
+braces, makes :token:`name` a maximally inserted implicit argument.  The second
+form, with square brackets, makes :token:`name` a non-maximally inserted implicit argument.
+
+For example:
 
 .. coqtop:: all
 
    Definition id {A : Type} (x : A) : A := x.
 
-This automatically declares the argument A of id as a maximally
-inserted implicit argument. One can then do as-if the argument was
-absent in every situation but still be able to specify it if needed:
+declares the argument `A` of `id` as a maximally
+inserted implicit argument. `A` may be omitted
+in applications of `id` but may be specified if needed:
 
 .. coqtop:: all
 
@@ -191,7 +186,7 @@ absent in every situation but still be able to specify it if needed:
 
    Goal forall A, compose id id = id (A:=A).
 
-For non maximally inserted implicit arguments, use square brackets:
+For non-maximally inserted implicit arguments, use square brackets:
 
 .. coqtop:: all
 
@@ -203,8 +198,7 @@ For non maximally inserted implicit arguments, use square brackets:
 
    Print Implicit map.
 
-The syntax is supported in all top-level definitions:
-:cmd:`Definition`, :cmd:`Fixpoint`, :cmd:`Lemma` and so on. For (co-)inductive datatype
+For (co-)inductive datatype
 declarations, the semantics are the following: an inductive parameter
 declared as an implicit argument need not be repeated in the inductive
 definition and will become implicit for the inductive type and the constructors.
@@ -225,11 +219,12 @@ The syntax is also supported in internal binders. For instance, in the
 following kinds of expressions, the type of each declaration present
 in :token:`binders` can be bracketed to mark the declaration as
 implicit:
-:n:`fun (@ident:forall {* @binder }, @type) => @term`,
-:n:`forall (@ident:forall {* @binder }, @type), @type`,
-:n:`let @ident {* @binder } := @term in @term`,
-:n:`fix @ident {* @binder } := @term in @term` and
-:n:`cofix @ident {* @binder } := @term in @term`.
+* :n:`fun (@ident:forall {* @binder }, @type) => @term`,
+* :n:`forall (@ident:forall {* @binder }, @type), @type`,
+* :n:`let @ident {* @binder } := @term in @term`,
+* :n:`fix @ident {* @binder } := @term in @term` and
+* :n:`cofix @ident {* @binder } := @term in @term`.
+
 Here is an example:
 
 .. coqtop:: all
@@ -258,190 +253,6 @@ Here is an example:
    .. coqtop:: all warn
 
       Check let g {x:nat} (H:x=x) {x} (H:x=x) := x in 0.
-
-
-Declaring Implicit Arguments
-++++++++++++++++++++++++++++
-
-
-
-.. cmd:: Arguments @smart_qualid {* @argument_spec_block } {* , {* @more_implicits_block } } {? : {+, @arguments_modifier } }
-   :name: Arguments
-
-   .. insertprodn smart_qualid arguments_modifier
-
-   .. prodn::
-      smart_qualid ::= @qualid
-      | @by_notation
-      by_notation ::= @string {? % @scope }
-      argument_spec_block ::= @argument_spec
-      | /
-      | &
-      | ( {+ @argument_spec } ) {? % @scope }
-      | [ {+ @argument_spec } ] {? % @scope }
-      | %{ {+ @argument_spec } %} {? % @scope }
-      argument_spec ::= {? ! } @name {? % @scope }
-      more_implicits_block ::= @name
-      | [ {+ @name } ]
-      | %{ {+ @name } %}
-      arguments_modifier ::= simpl nomatch
-      | simpl never
-      | default implicits
-      | clear bidirectionality hint
-      | clear implicits
-      | clear scopes
-      | clear scopes and implicits
-      | clear implicits and scopes
-      | rename
-      | assert
-      | extra scopes
-
-   This command sets implicit arguments *a posteriori*,
-   where the list of :n:`@name`\s is a prefix of the list of
-   arguments of :n:`@smart_qualid`.  Arguments in square
-   brackets are declared as implicit and arguments in curly brackets are declared as
-   maximally inserted.
-
-   After the command is issued, implicit arguments can and must be
-   omitted in any expression that applies :token:`qualid`.
-
-   This command supports the :attr:`local` and :attr:`global` attributes.
-   Default behavior is to limit the effect to the current section but also to
-   extend their effect outside the current module or library file.
-   Applying :attr:`local` limits the effect of the command to the current module if
-   it's not in a section.  Applying :attr:`global` within a section extends the
-   effect outside the current sections and current module if the command occurs.
-
-   A command containing :n:`@argument_spec_block & @argument_spec_block`
-   provides :ref:`bidirectionality_hints`.
-
-   Use the :n:`@more_implicits_block` to specify multiple implicit arguments declarations
-   for names of constants, inductive types, constructors and lemmas that can only be
-   applied to a fixed number of arguments (excluding, for instance,
-   constants whose type is polymorphic).
-   The longest applicable list of implicit arguments will be used to select which
-   implicit arguments are inserted.
-   For printing, the omitted arguments are the ones of the longest list of implicit
-   arguments of the sequence.  See the example :ref:`here<example_more_implicits>`.
-
-   The :n:`@arguments_modifier` values have various effects:
-
-   * :n:`clear implicits` - clears implicit arguments
-   * :n:`default implicits` - automatically determine the implicit arguments of the object.
-     See :ref:`auto_decl_implicit_args`.
-   * :n:`rename` - rename implicit arguments for the object
-   * :n:`assert` - assert that the object has the expected number of arguments with the
-     expected names.  See the example here: :ref:`renaming_implicit_arguments`.
-
-.. exn:: The / modifier may only occur once.
-   :undocumented:
-
-.. exn:: The & modifier may only occur once.
-   :undocumented:
-
-.. example::
-
-    .. coqtop:: reset all
-
-       Inductive list (A : Type) : Type :=
-       | nil : list A
-       | cons : A -> list A -> list A.
-
-       Check (cons nat 3 (nil nat)).
-
-       Arguments cons [A] _ _.
-
-       Arguments nil {A}.
-
-       Check (cons 3 nil).
-
-       Fixpoint map (A B : Type) (f : A -> B) (l : list A) : list B :=
-         match l with nil => nil | cons a t => cons (f a) (map A B f t) end.
-
-       Fixpoint length (A : Type) (l : list A) : nat :=
-         match l with nil => 0 | cons _ m => S (length A m) end.
-
-       Arguments map [A B] f l.
-
-       Arguments length {A} l. (* A has to be maximally inserted *)
-
-       Check (fun l:list (list nat) => map length l).
-
-.. _example_more_implicits:
-
-.. example:: Multiple implicit arguments with :n:`@more_implicits_block`
-
-   .. coqtop:: all
-
-       Arguments map [A B] f l, [A] B f l, A B f l.
-
-       Check (fun l => map length l = map (list nat) nat length l).
-
-.. note::
-   Use the :cmd:`Print Implicit` command to see the implicit arguments
-   of an object (see :ref:`displaying-implicit-args`).
-
-.. _auto_decl_implicit_args:
-
-Automatic declaration of implicit arguments
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-   The :n:`default implicits @arguments_modifier` clause tells |Coq| to automatically determine the
-   implicit arguments of the object.
-
-   Auto-detection is governed by flags specifying whether strict,
-   contextual, or reversible-pattern implicit arguments must be
-   considered or not (see :ref:`controlling-strict-implicit-args`, :ref:`controlling-contextual-implicit-args`,
-   :ref:`controlling-rev-pattern-implicit-args` and also :ref:`controlling-insertion-implicit-args`).
-
-.. example:: Default implicits
-
-   .. coqtop:: reset all
-
-       Inductive list (A:Set) : Set :=
-       | nil : list A
-       | cons : A -> list A -> list A.
-
-       Arguments cons : default implicits.
-
-       Print Implicit cons.
-
-       Arguments nil : default implicits.
-
-       Print Implicit nil.
-
-       Set Contextual Implicit.
-
-       Arguments nil : default implicits.
-
-       Print Implicit nil.
-
-The computation of implicit arguments takes account of the unfolding
-of constants. For instance, the variable ``p`` below has type
-``(Transitivity R)`` which is reducible to
-``forall x,y:U, R x y -> forall z:U, R y z -> R x z``. As the variables ``x``, ``y`` and ``z``
-appear strictly in the body of the type, they are implicit.
-
-.. coqtop:: all
-
-   Parameter X : Type.
-
-   Definition Relation := X -> X -> Prop.
-
-   Definition Transitivity (R:Relation) := forall x y:X, R x y -> forall z:X, R y z -> R x z.
-
-   Parameters (R : Relation) (p : Transitivity R).
-
-   Arguments p : default implicits.
-
-   Print p.
-
-   Print Implicit p.
-
-   Parameters (a b c : X) (r1 : R a b) (r2 : R b c).
-
-   Check (p r1 r2).
-
 
 Mode for automatic declaration of implicit arguments
 ++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -514,7 +325,7 @@ and the automatic declaration mode in on, the manual implicit arguments are adde
 automatically declared ones.
 
 In that case, and when the flag :flag:`Maximal Implicit Insertion` is set to off,
-some trailing implicit arguments can be inferred to be non maximally inserted. In
+some trailing implicit arguments can be inferred to be non-maximally inserted. In
 this case, they are converted to maximally inserted ones.
 
 .. example::
@@ -540,40 +351,29 @@ application. Use the :n:`(@ident := @term)` form of :token:`arg` to do so,
 where :token:`ident` is the name of the implicit argument and :token:`term`
 is its corresponding explicit term. Alternatively, one can deactivate
 the hiding of implicit arguments for a single function application using the
-:n:`@ @qualid {? @univ_annot } {* @term1 }` form of :token:`term10`.
+:n:`@@qualid_annotated {+ @term1 }` form of :token:`term_application`.
 
 .. example:: Syntax for explicitly giving implicit arguments (continued)
 
     .. coqtop:: all
 
+       Parameter X : Type.
+       Definition Relation := X -> X -> Prop.
+       Definition Transitivity (R:Relation) := forall x y:X, R x y -> forall z:X, R y z -> R x z.
+       Parameters (R : Relation) (p : Transitivity R).
+       Arguments p : default implicits.
+       Print Implicit p.
+       Parameters (a b c : X) (r1 : R a b) (r2 : R b c).
        Check (p r1 (z:=c)).
 
        Check (p (x:=a) (y:=b) r1 (z:=c) r2).
-
-
-.. _renaming_implicit_arguments:
-
-Renaming implicit arguments
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. example:: (continued)  Renaming implicit arguments
-
-   .. coqtop:: all
-
-      Arguments p [s t] _ [u] _: rename.
-
-      Check (p r1 (u:=c)).
-
-      Check (p (s:=a) (t:=b) r1 (u:=c) r2).
-
-      Fail Arguments p [s t] _ [w] _ : assert.
 
 .. _displaying-implicit-args:
 
 Displaying implicit arguments
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. cmd:: Print Implicit @smart_qualid
+.. cmd:: Print Implicit @reference
 
    Displays the implicit arguments associated with an object,
    identifying which arguments are applied maximally or not.
@@ -620,6 +420,30 @@ but succeeds in
 Deactivation of implicit arguments for parsing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. insertprodn term_explicit term_explicit
+
+.. prodn::
+   term_explicit ::= @ @qualid_annotated
+
+This syntax can be used to disable implicit arguments for a single
+function.
+
+.. example::
+
+   The function `id` has one implicit argument and one explicit
+   argument.
+
+   .. coqtop:: all reset
+
+      Check (id 0).
+      Definition id' := @id.
+
+   The function `id'` has no implicit argument.
+
+   .. coqtop:: all
+
+      Check (id' nat 0).
+
 .. flag:: Parsing Explicit
 
    Turning this flag on (it is off by default) deactivates the use of implicit arguments.
@@ -629,126 +453,18 @@ Deactivation of implicit arguments for parsing
    to be given as if no arguments were implicit. By symmetry, this also
    affects printing.
 
-.. _canonical-structure-declaration:
+.. example::
 
-Canonical structures
-~~~~~~~~~~~~~~~~~~~~
+   We can reproduce the example above using the :flag:`Parsing
+   Explicit` flag:
 
-A canonical structure is an instance of a record/structure type that
-can be used to solve unification problems involving a projection
-applied to an unknown structure instance (an implicit argument) and a
-value. The complete documentation of canonical structures can be found
-in :ref:`canonicalstructures`; here only a simple example is given.
+   .. coqtop:: all reset
 
-.. cmd:: Canonical {? Structure } @smart_qualid
-         Canonical {? Structure } @ident_decl @def_body
-   :name: Canonical Structure; _
-
-   The first form of this command declares an existing :n:`@smart_qualid` as a
-   canonical instance of a structure (a record).
-
-   The second form defines a new constant as if the :cmd:`Definition` command
-   had been used, then declares it as a canonical instance as if the first
-   form had been used on the defined object.
-
-   This command supports the :attr:`local` attribute.  When used, the
-   structure is canonical only within the :cmd:`Section` containing it.
-
-   Assume that :token:`qualid` denotes an object ``(Build_struct`` |c_1| … |c_n| ``)`` in the
-   structure :g:`struct` of which the fields are |x_1|, …, |x_n|.
-   Then, each time an equation of the form ``(``\ |x_i| ``_)`` |eq_beta_delta_iota_zeta| |c_i| has to be
-   solved during the type checking process, :token:`qualid` is used as a solution.
-   Otherwise said, :token:`qualid` is canonically used to extend the field |c_i|
-   into a complete structure built on |c_i|.
-
-   Canonical structures are particularly useful when mixed with coercions
-   and strict implicit arguments.
-
-   .. example::
-
-      Here is an example.
-
-      .. coqtop:: all
-
-         Require Import Relations.
-
-         Require Import EqNat.
-
-         Set Implicit Arguments.
-
-         Unset Strict Implicit.
-
-         Structure Setoid : Type := {Carrier :> Set; Equal : relation Carrier;
-                                     Prf_equiv : equivalence Carrier Equal}.
-
-         Definition is_law (A B:Setoid) (f:A -> B) := forall x y:A, Equal x y -> Equal (f x) (f y).
-
-         Axiom eq_nat_equiv : equivalence nat eq_nat.
-
-         Definition nat_setoid : Setoid := Build_Setoid eq_nat_equiv.
-
-         Canonical nat_setoid.
-
-      Thanks to :g:`nat_setoid` declared as canonical, the implicit arguments :g:`A`
-      and :g:`B` can be synthesized in the next statement.
-
-      .. coqtop:: all abort
-
-         Lemma is_law_S : is_law S.
-
-   .. note::
-      If a same field occurs in several canonical structures, then
-      only the structure declared first as canonical is considered.
-
-   .. attr:: canonical(false)
-
-      To prevent a field from being involved in the inference of
-      canonical instances, its declaration can be annotated with the
-      :attr:`canonical(false)` attribute (cf. the syntax of
-      :n:`@record_field`).
-
-      .. example::
-
-         For instance, when declaring the :g:`Setoid` structure above, the
-         :g:`Prf_equiv` field declaration could be written as follows.
-
-         .. coqdoc::
-
-            #[canonical(false)] Prf_equiv : equivalence Carrier Equal
-
-      See :ref:`canonicalstructures` for a more realistic example.
-
-.. attr:: canonical
-
-   This attribute can decorate a :cmd:`Definition` or :cmd:`Let` command.
-   It is equivalent to having a :cmd:`Canonical Structure` declaration just
-   after the command.
-
-.. cmd:: Print Canonical Projections {* @smart_qualid }
-
-   This displays the list of global names that are components of some
-   canonical structure. For each of them, the canonical structure of
-   which it is a projection is indicated. If constants are given as
-   its arguments, only the unification rules that involve or are
-   synthesized from simultaneously all given constants will be shown.
-
-   .. example::
-
-      For instance, the above example gives the following output:
-
-      .. coqtop:: all
-
-         Print Canonical Projections.
-
-      .. coqtop:: all
-
-         Print Canonical Projections nat.
-
-      .. note::
-
-         The last line in the first example would not show up if the
-         corresponding projection (namely :g:`Prf_equiv`) were annotated as not
-         canonical, as described above.
+      Set Parsing Explicit.
+      Definition id' := id.
+      Unset Parsing Explicit.
+      Check (id 1).
+      Check (id' nat 1).
 
 Implicit types of variables
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -806,7 +522,7 @@ Implicit generalization
 .. index:: `[! ]
 .. index:: `(! )
 
-.. insertprodn generalizing_binder typeclass_constraint
+.. insertprodn generalizing_binder term_generalizing
 
 .. prodn::
    generalizing_binder ::= `( {+, @typeclass_constraint } )
@@ -815,19 +531,20 @@ Implicit generalization
    typeclass_constraint ::= {? ! } @term
    | %{ @name %} : {? ! } @term
    | @name : {? ! } @term
-
+   term_generalizing ::= `%{ @term %}
+   | `( @term )
 
 Implicit generalization is an automatic elaboration of a statement
 with free variables into a closed statement where these variables are
 quantified explicitly.  Use the :cmd:`Generalizable` command to designate
 which variables should be generalized.
 
-It is activated for a binder by prefixing a \`, and for terms by
+It is activated within a binder by prefixing it with \`, and for terms by
 surrounding it with \`{ }, or \`[ ] or \`( ).
 
 Terms surrounded by \`{ } introduce their free variables as maximally
 inserted implicit arguments, terms surrounded by \`[ ] introduce them as
-non maximally inserted implicit arguments and terms surrounded by \`( )
+non-maximally inserted implicit arguments and terms surrounded by \`( )
 introduce them as explicit arguments.
 
 Generalizing binders always introduce their free variables as

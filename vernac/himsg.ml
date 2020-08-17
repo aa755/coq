@@ -57,16 +57,16 @@ let contract3 env sigma a b c = match contract env sigma [a;b;c] with
 let contract4 env sigma a b c d = match contract env sigma [a;b;c;d] with
   | env, [a;b;c;d] -> (env,a,b,c),d | _ -> assert false
 
-let contract1_vect env sigma a v =
-  match contract env sigma (a :: Array.to_list v) with
-  | env, a::l -> env,a,Array.of_list l
+let contract1 env sigma a v =
+  match contract env sigma (a :: v) with
+  | env, a::l -> env,a,l
   | _ -> assert false
 
 let rec contract3' env sigma a b c = function
   | OccurCheck (evk,d) ->
     let x,d = contract4 env sigma a b c d in x,OccurCheck(evk, d)
   | NotClean ((evk,args),env',d) ->
-      let env',d,args = contract1_vect env' sigma d args in
+      let env',d,args = contract1 env' sigma d args in
       contract3 env sigma a b c,NotClean((evk,args),env',d)
   | ConversionFailed (env',t1,t2) ->
       let (env',t1,t2) = contract2 env' sigma t1 t2 in
@@ -299,9 +299,9 @@ let explain_unification_error env sigma p1 p2 = function
         [str "cannot instantiate " ++ quote (pr_existential_key sigma evk)
         ++ strbrk " because " ++ pr_leconstr_env env sigma c ++
         strbrk " is not in its scope" ++
-        (if Array.is_empty args then mt() else
+        (if List.is_empty args then mt() else
          strbrk ": available arguments are " ++
-         pr_sequence (pr_leconstr_env env sigma) (List.rev (Array.to_list args)))]
+         pr_sequence (pr_leconstr_env env sigma) (List.rev args))]
      | NotSameArgSize | NotSameHead | NoCanonicalStructure ->
         (* Error speaks from itself *) []
      | ConversionFailed (env,t1,t2) ->
@@ -729,9 +729,9 @@ let explain_undeclared_universe env sigma l =
     spc () ++ str "(maybe a bugged tactic)."
 
 let explain_disallowed_sprop () =
-  Pp.(strbrk "SProp not allowed, you need to "
-      ++ str "Set Allow StrictProp"
-      ++ strbrk " or to use the -allow-sprop command-line-flag.")
+  Pp.(strbrk "SProp is disallowed because the "
+      ++ str "\"Allow StrictProp\""
+      ++ strbrk " flag is off.")
 
 let explain_bad_relevance env =
   strbrk "Bad relevance (maybe a bugged tactic)."
@@ -1096,7 +1096,7 @@ let explain_typeclass_error env sigma = function
 (* Refiner errors *)
 
 let explain_refiner_bad_type env sigma arg ty conclty =
-  let pm, pn = with_diffs (pr_lconstr_env env sigma ty) (pr_lconstr_env env sigma conclty) in
+  let pm, pn = with_diffs (pr_lconstr_env env sigma ty) (pr_leconstr_env env sigma conclty) in
   str "Refiner was given an argument" ++ brk(1,1) ++
   pr_lconstr_env env sigma arg ++ spc () ++
   str "of type" ++ brk(1,1) ++ pm ++ spc () ++
@@ -1112,15 +1112,8 @@ let explain_refiner_cannot_apply env sigma t harg =
   pr_lconstr_env env sigma t ++ spc () ++ str "could not be applied to" ++ brk(1,1) ++
   pr_lconstr_env env sigma harg ++ str "."
 
-let explain_refiner_not_well_typed env sigma c =
-  str "The term " ++ pr_lconstr_env env sigma c ++ str " is not well-typed."
-
 let explain_intro_needs_product () =
   str "Introduction tactics needs products."
-
-let explain_does_not_occur_in env sigma c hyp =
-  str "The term" ++ spc () ++ pr_lconstr_env env sigma c ++ spc () ++
-  str "does not occur in" ++ spc () ++ Id.print hyp ++ str "."
 
 let explain_non_linear_proof env sigma c =
   str "Cannot refine with term" ++ brk(1,1) ++ pr_lconstr_env env sigma c ++
@@ -1137,9 +1130,7 @@ let explain_refiner_error env sigma = function
   | BadType (arg,ty,conclty) -> explain_refiner_bad_type env sigma arg ty conclty
   | UnresolvedBindings t -> explain_refiner_unresolved_bindings t
   | CannotApply (t,harg) -> explain_refiner_cannot_apply env sigma t harg
-  | NotWellTyped c -> explain_refiner_not_well_typed env sigma c
   | IntroNeedsProduct -> explain_intro_needs_product ()
-  | DoesNotOccurIn (c,hyp) -> explain_does_not_occur_in env sigma c hyp
   | NonLinearProof c -> explain_non_linear_proof env sigma c
   | MetaInType c -> explain_meta_in_type env sigma c
   | NoSuchHyp id -> explain_no_such_hyp id

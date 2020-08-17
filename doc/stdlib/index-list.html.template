@@ -13,6 +13,7 @@ through the <tt>Require Import</tt> command.</p>
     The core library (automatically loaded when starting Coq)
   </dt>
   <dd>
+    theories/Init/Ltac.v
     theories/Init/Notations.v
     theories/Init/Datatypes.v
     theories/Init/Logic.v
@@ -20,6 +21,8 @@ through the <tt>Require Import</tt> command.</p>
     theories/Init/Byte.v
     theories/Init/Nat.v
     theories/Init/Decimal.v
+    theories/Init/Hexadecimal.v
+    theories/Init/Numeral.v
     theories/Init/Peano.v
     theories/Init/Specif.v
     theories/Init/Tactics.v
@@ -98,6 +101,7 @@ through the <tt>Require Import</tt> command.</p>
   <dd>
     theories/Bool/Bool.v
     theories/Bool/BoolEq.v
+    theories/Bool/BoolOrder.v
     theories/Bool/DecBool.v
     theories/Bool/IfProp.v
     theories/Bool/Sumbool.v
@@ -233,7 +237,15 @@ through the <tt>Require Import</tt> command.</p>
     theories/Numbers/DecimalPos.v
     theories/Numbers/DecimalN.v
     theories/Numbers/DecimalZ.v
+    theories/Numbers/DecimalQ.v
     theories/Numbers/DecimalString.v
+    theories/Numbers/HexadecimalFacts.v
+    theories/Numbers/HexadecimalNat.v
+    theories/Numbers/HexadecimalPos.v
+    theories/Numbers/HexadecimalN.v
+    theories/Numbers/HexadecimalZ.v
+    theories/Numbers/HexadecimalQ.v
+    theories/Numbers/HexadecimalString.v
     </dd>
 
     <dt> <b>&nbsp;&nbsp;NatInt</b>:
@@ -444,6 +456,7 @@ through the <tt>Require Import</tt> command.</p>
     theories/Sorting/PermutSetoid.v
     theories/Sorting/Mergesort.v
     theories/Sorting/Sorted.v
+    theories/Sorting/CPermutation.v
   </dd>
 
   <dt> <b>Wellfounded</b>:
@@ -527,18 +540,15 @@ through the <tt>Require Import</tt> command.</p>
     Formalization of real numbers
   </dt>
   <dd>
+    <dl> 
+  <dt> <b>Classical Reals</b>:
+    Real numbers with excluded middle, total order and least upper bounds
+  </dt>
+  <dd>
     theories/Reals/Rdefinitions.v
-    theories/Reals/Cauchy/ConstructiveCauchyReals.v
-    theories/Reals/Cauchy/ConstructiveCauchyRealsMult.v
-    theories/Reals/Cauchy/ConstructiveCauchyAbs.v
     theories/Reals/ClassicalDedekindReals.v
+    theories/Reals/ClassicalConstructiveReals.v
     theories/Reals/Raxioms.v
-    theories/Reals/Abstract/ConstructiveReals.v
-    theories/Reals/Abstract/ConstructiveRealsMorphisms.v
-    theories/Reals/Abstract/ConstructiveLUB.v
-    theories/Reals/Abstract/ConstructiveAbs.v
-    theories/Reals/Abstract/ConstructiveLimits.v
-    theories/Reals/Abstract/ConstructiveSum.v
     theories/Reals/RIneq.v
     theories/Reals/DiscrR.v
     theories/Reals/ROrderedType.v
@@ -584,7 +594,6 @@ through the <tt>Require Import</tt> command.</p>
     theories/Reals/Ranalysis5.v
     theories/Reals/Ranalysis_reg.v
     theories/Reals/Rcomplete.v
-    theories/Reals/Cauchy/ConstructiveRcomplete.v
     theories/Reals/RiemannInt.v
     theories/Reals/RiemannInt_SF.v
     theories/Reals/Rpow_def.v
@@ -603,6 +612,31 @@ through the <tt>Require Import</tt> command.</p>
     theories/Reals/Rregisternames.v
     (theories/Reals/Reals.v)
     theories/Reals/Runcountable.v
+  </dd>
+  <dt> <b>Abstract Constructive Reals</b>:
+    Interface of constructive reals, proof of equivalence of all implementations. EXPERIMENTAL 
+  </dt>
+  <dd>
+    theories/Reals/Abstract/ConstructiveReals.v
+    theories/Reals/Abstract/ConstructiveRealsMorphisms.v
+    theories/Reals/Abstract/ConstructiveLUB.v
+    theories/Reals/Abstract/ConstructiveAbs.v
+    theories/Reals/Abstract/ConstructiveLimits.v
+    theories/Reals/Abstract/ConstructiveMinMax.v
+    theories/Reals/Abstract/ConstructivePower.v
+    theories/Reals/Abstract/ConstructiveSum.v 
+  </dd>
+  <dt> <b>Constructive Cauchy Reals</b>:
+    Cauchy sequences of rational numbers, implementation of the interface. EXPERIMENTAL
+  </dt>
+  <dd>
+    theories/Reals/Cauchy/ConstructiveRcomplete.v
+    theories/Reals/Cauchy/ConstructiveCauchyReals.v
+    theories/Reals/Cauchy/ConstructiveCauchyRealsMult.v
+    theories/Reals/Cauchy/ConstructiveCauchyAbs.v
+  </dd>
+
+  </dl>
   </dd>
 
   <dt> <b>Program</b>:

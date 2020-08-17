@@ -62,6 +62,10 @@ coqtopbyte := $(BIN)coqtop.byte -q
 coqc_interactive := $(coqc) -test-mode -async-proofs-cache force
 coqdep := $(BIN)coqdep
 
+# This is the convention for coq_makefile
+OPT=-$(BEST)
+export OPT
+
 VERBOSE?=
 SHOW := $(if $(VERBOSE),@true,@echo)
 HIDE := $(if $(VERBOSE),,@)
@@ -111,12 +115,13 @@ VSUBSYSTEMS := prerequisite success failure $(BUGS) output output-coqtop \
   coqdoc ssr primitive/uint63 primitive/float ltac2
 
 # All subsystems
-SUBSYSTEMS := $(VSUBSYSTEMS) misc bugs ide vio coqchk coqwc coq-makefile tools $(UNIT_TESTS)
+SUBSYSTEMS := $(VSUBSYSTEMS) misc bugs ide vio coqchk output-coqchk coqwc coq-makefile tools $(UNIT_TESTS)
 
-PREREQUISITELOG = prerequisite/admit.v.log			\
-  prerequisite/make_local.v.log prerequisite/make_notation.v.log \
-  prerequisite/bind_univs.v.log prerequisite/module_bug8416.v.log \
-  prerequisite/module_bug7192.v.log
+.csdp.cache: .csdp.cache.test-suite
+	cp $< $@
+	chmod u+w $@
+
+PREREQUISITELOG = $(addsuffix .log,$(wildcard prerequisite/*.v)) .csdp.cache
 
 #######################################################################
 # Phony targets
@@ -187,6 +192,7 @@ summary:
 	  $(call summary_dir, "IDE tests", ide); \
 	  $(call summary_dir, "VI tests", vio); \
 	  $(call summary_dir, "Coqchk tests", coqchk); \
+	  $(call summary_dir, "Output tests with coqchk", output-coqchk); \
 	  $(call summary_dir, "Coqwc tests", coqwc); \
 	  $(call summary_dir, "Coq makefile", coq-makefile); \
 	  $(call summary_dir, "Coqdoc tests", coqdoc); \
@@ -280,8 +286,8 @@ OCAMLOPT := $(OCAMLFIND) opt $(CAMLFLAGS)
 OCAMLC := $(OCAMLFIND) ocamlc $(CAMLFLAGS)
 
 # ML files from unit-test framework, not containing tests
-UNIT_SRCFILES:=$(shell find ./unit-tests/src -name *.ml)
-UNIT_ALLMLFILES:=$(shell find ./unit-tests -name *.ml)
+UNIT_SRCFILES:=$(shell find ./unit-tests/src -name '*.ml')
+UNIT_ALLMLFILES:=$(shell find ./unit-tests -name '*.ml')
 UNIT_MLFILES:=$(filter-out $(UNIT_SRCFILES),$(UNIT_ALLMLFILES))
 UNIT_LOGFILES:=$(patsubst %.ml,%.ml.log,$(UNIT_MLFILES))
 
@@ -309,11 +315,6 @@ unit-tests: $(UNIT_LOGFILES)
 unit-tests/%.ml.log: unit-tests/%.ml unit-tests/src/$(UNIT_LINK)
 	$(SHOW) 'TEST      $<'
 	$(HIDE)$(OCAMLBEST) -linkall -linkpkg -package coq.toplevel,oUnit \
-	     -I unit-tests/src $(UNIT_LINK) $< -o $<.test;
-	$(HIDE)./$<.test
-unit-tests/ide/%.ml.log: unit-tests/ide/%.ml unit-tests/src/$(UNIT_LINK)
-	$(SHOW) 'TEST      $<'
-	$(HIDE)$(OCAMLBEST) -linkall -linkpkg -package coq.ide,oUnit \
 	     -I unit-tests/src $(UNIT_LINK) $< -o $<.test;
 	$(HIDE)./$<.test
 
@@ -462,6 +463,43 @@ $(addsuffix .log,$(wildcard output-coqtop/*.v)): %.v.log: %.v %.out $(PREREQUISI
 	  fi; \
 	} > "$@"
 
+output-coqchk: $(addsuffix .log,$(wildcard output-coqchk/*.v))
+$(addsuffix .log,$(wildcard output-coqchk/*.v)): %.v.log: %.v %.out $(PREREQUISITELOG)
+	@echo "TEST      $< $(call get_coq_prog_args_in_parens,"$<")"
+	$(HIDE){ \
+	  opts="$(if $(findstring modules/,$<),-R modules Mods)"; \
+	  echo $(call log_intro,$<); \
+	  $(coqc) "$<" $(call get_coq_prog_args,"$<") $$opts 2>&1; R=$$?; times; \
+	  if [ $$R = 0 ]; then \
+	    echo $(log_success); \
+	    echo "    $<...Ok"; \
+	  else \
+	    echo $(log_failure); \
+	    echo "    $<...Error! (should be accepted)"; \
+	    $(FAIL); \
+	  fi; \
+	} > "$@"
+	@if ! grep -q -F "Error!" $@; then echo "CHECK     $<"; fi
+	$(HIDE)if ! grep -q -F "Error!" $@; then { \
+	  echo $(call log_intro,$<); \
+	  output=$*.out.real; \
+	  export LC_CTYPE=C; \
+	  export LANG=C; \
+	  $(coqchk) -o -silent $(call get_set_impredicativity,$<) $(if $(findstring modules/,$<),-R modules Mods -norec Mods.$(shell basename $< .v),-Q $(shell dirname $<) "" -norec $(shell basename $< .v)) 2>&1 \
+	    | sed 's/File "[^"]*"/File "stdin"/' \
+	    > $$output; \
+	  diff -a -u --strip-trailing-cr $*.out $$output 2>&1; R=$$?; times; \
+	  if [ $$R = 0 ]; then \
+	    echo $(log_success); \
+	    echo "    $<...Ok"; \
+	    rm $$output; \
+	  else \
+	    echo $(log_failure); \
+	    echo "    $<...Error! (unexpected output)"; \
+	    $(FAIL); \
+	  fi; \
+	} > "$(shell dirname $<)/$(shell basename $< .v).chk.log"; fi
+
 .PHONY: approve-output
 approve-output: output output-coqtop
 	$(HIDE)for f in output/*.out.real; do \
@@ -474,6 +512,7 @@ approve-output: output output-coqtop
 output/MExtraction.out: ../plugins/micromega/micromega.ml
 	$(SHOW) GEN $@
 	$(HIDE) cp $< $@
+	$(HIDE) chmod u+w $@
 	$(HIDE) echo >> $@
 
 $(addsuffix .log,$(wildcard output-modulo-time/*.v)): %.v.log: %.v %.out
@@ -590,7 +629,14 @@ $(addsuffix .log,$(wildcard ideal-features/*.v)): %.v.log: %.v $(PREREQUISITELOG
 	} > "$@"
 
 # Additional dependencies for module tests
-$(addsuffix .log,$(wildcard modules/*.v)): %.v.log: modules/Nat.vo modules/plik.vo
+COMMON_MODULE_DEPENDENCIES := modules/plik.v modules/Nat.v
+# We exclude Nat.v.log and plik.v.log because these log files do not
+# depend on having the corresponding .vo files built first, and we end
+# up with pseudo-cyclic build rules if we don't exclude them (See
+# COQBUG(https://github.com/coq/coq/issues/12582)). Additionally, we
+# impose order-only dependencies to ensure that we won't rebuild the
+# .vo files in the .log target after we've already built them.
+$(addsuffix .log,$(filter-out $(COMMON_MODULE_DEPENDENCIES),$(wildcard modules/*.v))): %.v.log: $(COMMON_MODULE_DEPENDENCIES:.v=.vo) | $(COMMON_MODULE_DEPENDENCIES:.v=.v.log)
 modules/%.vo: modules/%.v
 	$(HIDE)$(coqc) -R modules Mods $<
 
@@ -724,8 +770,6 @@ coq-makefile/%.log : coq-makefile/%/run.sh
 	) > "$@"
 
 # coqdoc
-
-coqdoc: $(patsubst %.sh,%.log,$(wildcard coqdoc/*.sh))
 
 $(addsuffix .log,$(wildcard coqdoc/*.v)): %.v.log: %.v %.html.out %.tex.out $(PREREQUISITELOG)
 	@echo "TEST      $< $(call get_coq_prog_args_in_parens,"$<")"

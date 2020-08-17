@@ -15,10 +15,6 @@ open Libnames
 
 open Pcoq.Prim
 
-let prim_kw = ["{"; "}"; "["; "]"; "("; ")"; "'"; "%"; "|"]
-let _ = List.iter CLexer.add_keyword prim_kw
-
-
 let local_make_qualid loc l id = make_qualid ~loc (DirPath.make l) id
 
 let my_int_of_string ?loc s =
@@ -53,7 +49,7 @@ GRAMMAR EXTEND Gram
     bignat bigint natural integer identref name ident var preident
     fullyqualid qualid reference dirpath ne_lstring
     ne_string string lstring pattern_ident pattern_identref by_notation
-    smart_global bar_cbrace;
+    smart_global bar_cbrace strategy_level;
   preident:
     [ [ s = IDENT -> { s } ] ]
   ;
@@ -139,5 +135,11 @@ GRAMMAR EXTEND Gram
  ;
   bar_cbrace:
     [ [ test_pipe_closedcurly; "|"; "}" -> { () } ] ]
+  ;
+  strategy_level:
+    [ [ IDENT "expand" -> { Conv_oracle.Expand }
+      | IDENT "opaque" -> { Conv_oracle.Opaque }
+      | n=integer -> { Conv_oracle.Level n }
+      | IDENT "transparent" -> { Conv_oracle.transparent } ] ]
   ;
 END

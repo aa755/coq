@@ -23,19 +23,33 @@
  (targets refman-html)
  (alias refman-html)
  (package coq-doc)
- (deps (alias refman-deps))
+ ; Cannot use this deps alias because of ocaml/dune#3415
+ ; (deps (alias refman-deps))
+ (deps
+  (package coq)
+  (source_tree sphinx)
+  (source_tree tools/coqrst)
+  unreleased.rst
+  (env_var SPHINXWARNOPT))
  (action
-  (run env COQLIB=%{project_root} sphinx-build %{env:SPHINXWARNOPT=-W} -b html sphinx %{targets})))
+  (run env COQLIB=%{project_root} sphinx-build -q %{env:SPHINXWARNOPT=-W} -b html sphinx %{targets})))
 
 (rule
  (targets refman-pdf)
  (alias refman-pdf)
  (package coq-doc)
- (deps (alias refman-deps))
+ ; Cannot use this deps alias because of ocaml/dune#3415
+ ; (deps (alias refman-deps))
+ (deps
+  (package coq)
+  (source_tree sphinx)
+  (source_tree tools/coqrst)
+  unreleased.rst
+  (env_var SPHINXWARNOPT))
  (action
   (progn
-   (run env COQLIB=%{project_root} sphinx-build %{env:SPHINXWARNOPT=-W} -b latex sphinx %{targets})
-   (chdir %{targets} (run make)))))
+   (run env COQLIB=%{project_root} sphinx-build -q %{env:SPHINXWARNOPT=-W} -b latex sphinx %{targets})
+   (chdir %{targets} (run make LATEXMKOPTS=-silent)))))
 
 ; Installable directories are not yet fully supported by Dune.  See
 ; ocaml/dune#1868.  Yet, this makes coq-doc.install a valid target to

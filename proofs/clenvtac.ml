@@ -13,7 +13,6 @@ open Constr
 open Termops
 open Evd
 open EConstr
-open Refiner
 open Logic
 open Reduction
 open Clenv
@@ -36,7 +35,7 @@ let clenv_cast_meta clenv =
     match EConstr.kind clenv.evd (strip_outer_cast clenv.evd u) with
       | Meta mv ->
           (try
-            let b = Typing.meta_type clenv.evd mv in
+            let b = Typing.meta_type clenv.env clenv.evd mv in
             assert (not (occur_meta clenv.evd b));
             if occur_meta clenv.evd b then u
             else mkCast (mkMeta mv, DEFAULTcast, b)
@@ -61,10 +60,7 @@ let clenv_pose_dependent_evars ?(with_evars=false) clenv =
   clenv_pose_metas_as_evars clenv dep_mvs
 
 let clenv_refine ?(with_evars=false) ?(with_classes=true) clenv =
-  (* ppedrot: a Goal.enter here breaks things, because the tactic below may
-     solve goals by side effects, while the compatibility layer keeps those
-     useless goals. That deserves a FIXME. *)
-  Proofview.V82.tactic begin fun gl ->
+  Proofview.Goal.enter begin fun gl ->
   let clenv, evars = clenv_pose_dependent_evars ~with_evars clenv in
   let evd' =
     if with_classes then
@@ -78,9 +74,9 @@ let clenv_refine ?(with_evars=false) ?(with_classes=true) clenv =
     else clenv.evd
   in
   let clenv = { clenv with evd = evd' } in
-  tclTHEN
-    (tclEVARS (Evd.clear_metas evd'))
-    (refiner ~check:false EConstr.Unsafe.(to_constr (clenv_cast_meta clenv (clenv_value clenv)))) gl
+  Proofview.tclTHEN
+    (Proofview.Unsafe.tclEVARS (Evd.clear_metas evd'))
+    (refiner ~check:false EConstr.Unsafe.(to_constr (clenv_cast_meta clenv (clenv_value clenv))))
   end
 
 let clenv_pose_dependent_evars ?(with_evars=false) clenv =
@@ -133,5 +129,7 @@ let unify ?(flags=fail_quick_unif_flags) m =
     try
       let evd' = w_unify env evd CONV ~flags m n in
         Proofview.Unsafe.tclEVARSADVANCE evd'
-    with e when CErrors.noncritical e -> Proofview.tclZERO e
+    with e when CErrors.noncritical e ->
+      let info = Exninfo.reify () in
+      Proofview.tclZERO ~info e
   end

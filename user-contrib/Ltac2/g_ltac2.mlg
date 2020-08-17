@@ -8,6 +8,8 @@
 (*         *     (see LICENSE file for the text of the license)         *)
 (************************************************************************)
 
+DECLARE PLUGIN "ltac2_plugin"
+
 {
 
 open Pp
@@ -145,10 +147,10 @@ GRAMMAR EXTEND Gram
         { CAst.make ~loc @@ CTacCse (e, bl) }
       ]
     | "4" LEFTA [ ]
-    | [ e0 = SELF; ","; el = LIST1 NEXT SEP "," ->
+    | "3" [ e0 = SELF; ","; el = LIST1 NEXT SEP "," ->
         { let el = e0 :: el in
           CAst.make ~loc @@ CTacApp (CAst.make ~loc @@ CTacCst (AbsKn (Tuple (List.length el))), el) } ]
-    | "::" RIGHTA
+    | "2" RIGHTA
       [ e1 = tac2expr; "::"; e2 = tac2expr ->
         { CAst.make ~loc @@ CTacApp (CAst.make ~loc @@ CTacCst (AbsKn (Other Tac2core.Core.c_cons)), [e1; e2]) }
       ]
@@ -260,12 +262,16 @@ GRAMMAR EXTEND Gram
     | "1" LEFTA
       [ t = SELF; qid = Prim.qualid -> { CAst.make ~loc @@ CTypRef (RelId qid, [t]) } ]
     | "0"
-      [ "("; t = tac2type LEVEL "5"; ")"  -> { t }
+      [ "(";  p = LIST1 tac2type LEVEL "5" SEP ","; ")"; qid = OPT Prim.qualid ->
+        { match p, qid with
+          | [t], None -> t
+          | _, None -> CErrors.user_err ~loc (Pp.str "Syntax error")
+          | ts, Some qid -> CAst.make ~loc @@ CTypRef (RelId qid, p)
+        }
       | id = typ_param -> { CAst.make ~loc @@ CTypVar (Name id) }
       | "_" -> { CAst.make ~loc @@ CTypVar Anonymous }
       | qid = Prim.qualid -> { CAst.make ~loc @@ CTypRef (RelId qid, []) }
-      | "("; p = LIST1 tac2type LEVEL "5" SEP ","; ")"; qid = Prim.qualid ->
-        { CAst.make ~loc @@ CTypRef (RelId qid, p) } ]
+      ]
     ];
   locident:
     [ [ id = Prim.ident -> { CAst.make ~loc id } ] ]
@@ -289,7 +295,7 @@ GRAMMAR EXTEND Gram
     ] ]
   ;
   tac2def_mut:
-    [ [ "Set"; qid = Prim.qualid; ":="; e = tac2expr -> { StrMut (qid, e) } ] ]
+    [ [ "Set"; qid = Prim.qualid; old = OPT [ "as"; id = locident -> { id } ]; ":="; e = tac2expr -> { StrMut (qid, old, e) } ] ]
   ;
   tac2typ_knd:
     [ [ t = tac2type -> { CTydDef (Some t) }

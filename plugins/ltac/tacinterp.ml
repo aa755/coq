@@ -162,17 +162,27 @@ let catching_error call_trace fail (e, info) =
     fail located_exc
   end
 
-let catch_error call_trace f x =
+let update_loc ?loc (e, info) =
+  (e, Option.cata (Loc.add_loc info) info loc)
+
+let catch_error ?loc call_trace f x =
   try f x
   with e when CErrors.noncritical e ->
     let e = Exninfo.capture e in
+    let e = update_loc ?loc e in
     catching_error call_trace Exninfo.iraise e
 
-let wrap_error tac k =
-  if is_traced () then Proofview.tclORELSE tac k else tac
+let catch_error_loc ?loc tac =
+  Proofview.tclOR tac (fun exn ->
+      let (e, info) = update_loc ?loc exn in
+      Proofview.tclZERO ~info e)
 
-let catch_error_tac call_trace tac =
-  wrap_error
+let wrap_error ?loc tac k =
+  if is_traced () then Proofview.tclORELSE tac k
+  else catch_error_loc ?loc tac
+
+let catch_error_tac ?loc call_trace tac =
+  wrap_error ?loc
     tac
     (catching_error call_trace (fun (e, info) -> Proofview.tclZERO ~info e))
 
@@ -368,7 +378,9 @@ let interp_reference ist env sigma = function
     with Not_found ->
       try
         GlobRef.VarRef (get_id (Environ.lookup_named id env))
-      with Not_found -> Nametab.error_global_not_found (qualid_of_ident ?loc id)
+      with Not_found as exn ->
+        let _, info = Exninfo.capture exn in
+        Nametab.error_global_not_found ~info (qualid_of_ident ?loc id)
 
 let try_interp_evaluable env (loc, id) =
   let v = Environ.lookup_named id env in
@@ -381,17 +393,21 @@ let interp_evaluable ist env sigma = function
     (* Maybe [id] has been introduced by Intro-like tactics *)
     begin
       try try_interp_evaluable env (loc, id)
-      with Not_found ->
+      with Not_found as exn ->
         match r with
         | EvalConstRef _ -> r
-        | _ -> Nametab.error_global_not_found (qualid_of_ident ?loc id)
+        | _ ->
+          let _, info = Exninfo.capture exn in
+          Nametab.error_global_not_found ~info (qualid_of_ident ?loc id)
     end
   | ArgArg (r,None) -> r
   | ArgVar {loc;v=id} ->
     try try_interp_ltac_var (coerce_to_evaluable_ref env sigma) ist (Some (env,sigma)) (make ?loc id)
     with Not_found ->
       try try_interp_evaluable env (loc, id)
-      with Not_found -> Nametab.error_global_not_found (qualid_of_ident ?loc id)
+      with Not_found as exn ->
+        let _, info = Exninfo.capture exn in
+        Nametab.error_global_not_found ~info (qualid_of_ident ?loc id)
 
 (* Interprets an hypothesis name *)
 let interp_occurrences ist occs =
@@ -535,9 +551,10 @@ let interp_gen kind ist pattern_mode flags env sigma c =
     ltac_idents = constrvars.idents;
     ltac_genargs = ist.lfun;
   } in
-  let trace = push_trace (loc_of_glob_constr term,LtacConstrInterp (term,vars)) ist in
+  let loc = loc_of_glob_constr term in
+  let trace = push_trace (loc,LtacConstrInterp (term,vars)) ist in
   let (evd,c) =
-    catch_error trace (understand_ltac flags env sigma vars kind) term
+    catch_error ?loc trace (understand_ltac flags env sigma vars kind) term
   in
   (* spiwack: to avoid unnecessary modifications of tacinterp, as this
      function already use effect, I call [run] hoping it doesn't mess
@@ -652,8 +669,9 @@ let interp_closed_typed_pattern_with_occurrences ist env sigma (occs, a) =
         let c = coerce_to_closed_constr env x in
         Inr (pattern_of_constr env sigma (EConstr.to_constr sigma c)) in
     (try try_interp_ltac_var coerce_eval_ref_or_constr ist (Some (env,sigma)) (make ?loc id)
-     with Not_found ->
-       Nametab.error_global_not_found (qualid_of_ident ?loc id))
+     with Not_found as exn ->
+       let _, info = Exninfo.capture exn in
+       Nametab.error_global_not_found ~info (qualid_of_ident ?loc id))
   | Inl (ArgArg _ as b) -> Inl (interp_evaluable ist env sigma b)
   | Inr c -> Inr (interp_typed_pattern ist env sigma c) in
   interp_occurrences ist occs, p
@@ -763,7 +781,9 @@ let interp_message_token ist = function
   | MsgIdent {loc;v=id} ->
     let v = try Some (Id.Map.find id ist.lfun) with Not_found -> None in
     match v with
-    | None -> Ftactic.lift (Tacticals.New.tclZEROMSG (Id.print id ++ str" not found."))
+    | None -> Ftactic.lift (
+        let info = Exninfo.reify () in
+        Tacticals.New.tclZEROMSG ~info (Id.print id ++ str" not found."))
     | Some v -> message_of_value v
 
 let interp_message ist l =
@@ -1059,7 +1079,7 @@ and eval_tactic ist tac : unit Proofview.tactic = match tac with
       let call = LtacAtomCall t in
       let trace = push_trace(loc,call) ist in
       Profile_ltac.do_profile "eval_tactic:2" trace
-        (catch_error_tac trace (interp_atomic ist t))
+        (catch_error_tac ?loc trace (interp_atomic ist t))
   | TacFun _ | TacLetIn _ | TacMatchGoal _ | TacMatch _ -> interp_tactic ist tac
   | TacId [] -> Proofview.tclLIFT (db_breakpoint (curr_debug ist) [])
   | TacId s ->
@@ -1076,18 +1096,22 @@ and eval_tactic ist tac : unit Proofview.tactic = match tac with
       end
   | TacFail (g,n,s) ->
       let msg = interp_message ist s in
-      let tac l = Tacticals.New.tclFAIL (interp_int_or_var ist n) l in
+      let tac ~info l = Tacticals.New.tclFAIL ~info (interp_int_or_var ist n) l in
       let tac =
         match g with
-        | TacLocal -> fun l -> Proofview.tclINDEPENDENT (tac l)
-        | TacGlobal -> tac
+        | TacLocal ->
+          let info = Exninfo.reify () in
+          fun l -> Proofview.tclINDEPENDENT (tac ~info l)
+        | TacGlobal ->
+          let info = Exninfo.reify () in
+          tac ~info
       in
       Ftactic.run msg tac
   | TacProgress tac -> Tacticals.New.tclPROGRESS (interp_tactic ist tac)
   | TacShowHyps tac ->
          Proofview.V82.tactic begin
            tclSHOWHYPS (Proofview.V82.of_tactic (interp_tactic ist tac))
-         end
+         end [@ocaml.warning "-3"]
   | TacAbstract (t,ido) ->
       let call = LtacMLCall tac in
       let trace = push_trace(None,call) ist in
@@ -1149,7 +1173,7 @@ and eval_tactic ist tac : unit Proofview.tactic = match tac with
         ; poly
         ; extra = TacStore.set ist.extra f_trace trace } in
         val_interp ist alias.Tacenv.alias_body >>= fun v ->
-        Ftactic.lift (tactic_of_value ist v)
+        Ftactic.lift (catch_error_loc ?loc (tactic_of_value ist v))
       in
       let tac =
         Ftactic.with_env interp_vars >>= fun (env, lr) ->
@@ -1163,8 +1187,11 @@ and eval_tactic ist tac : unit Proofview.tactic = match tac with
         let len1 = List.length alias.Tacenv.alias_args in
         let len2 = List.length l in
         if len1 = len2 then tac
-        else Tacticals.New.tclZEROMSG (str "Arguments length mismatch: \
-          expected " ++ int len1 ++ str ", found " ++ int len2)
+        else
+          let info = Exninfo.reify () in
+          Tacticals.New.tclZEROMSG ~info
+            (str "Arguments length mismatch: \
+                  expected " ++ int len1 ++ str ", found " ++ int len2)
       in
       Ftactic.run tac (fun () -> Proofview.tclUNIT ())
 
@@ -1175,7 +1202,7 @@ and eval_tactic ist tac : unit Proofview.tactic = match tac with
       let args = Ftactic.List.map_right (fun a -> interp_tacarg ist a) l in
       let tac args =
         let name _ _ = Pptactic.pr_extend (fun v -> print_top_val () v) 0 opn args in
-        Proofview.Trace.name_tactic name (catch_error_tac trace (tac args ist))
+        Proofview.Trace.name_tactic name (catch_error_tac ?loc trace (tac args ist))
       in
       Ftactic.run args tac
 
@@ -1256,7 +1283,7 @@ and interp_tacarg ist arg : Val.t Ftactic.t =
 and interp_app loc ist fv largs : Val.t Ftactic.t =
   Proofview.tclProofInfo [@ocaml.warning "-3"] >>= fun (_name, poly) ->
   let (>>=) = Ftactic.bind in
-  let fail = Tacticals.New.tclZEROMSG (str "Illegal tactic application.") in
+  let fail ~info = Tacticals.New.tclZEROMSG ~info (str "Illegal tactic application.") in
   if has_type fv (topwit wit_tacvalue) then
   match to_tacvalue fv with
      (* if var=[] and body has been delayed by val_interp, then body
@@ -1278,7 +1305,7 @@ and interp_app loc ist fv largs : Val.t Ftactic.t =
                 ; extra = TacStore.set ist.extra f_trace []
                 } in
               Profile_ltac.do_profile "interp_app" trace ~count_call:false
-                (catch_error_tac trace (val_interp ist body)) >>= fun v ->
+                (catch_error_tac ?loc trace (val_interp ist body)) >>= fun v ->
               Ftactic.return (name_vfun (push_appl appl largs) v)
             end
             begin fun (e, info) ->
@@ -1302,12 +1329,18 @@ and interp_app loc ist fv largs : Val.t Ftactic.t =
         Ftactic.return (of_tacvalue (VFun(push_appl appl largs,trace,newlfun,lvar,body)))
     | (VFun(appl,trace,olfun,[],body)) ->
       let extra_args = List.length largs in
-      Tacticals.New.tclZEROMSG (str "Illegal tactic application: got " ++
-                                str (string_of_int extra_args) ++
-                                str " extra " ++ str (String.plural extra_args "argument") ++
-                                str ".")
-    | VRec(_,_) -> fail
-  else fail
+      let info = Exninfo.reify () in
+      Tacticals.New.tclZEROMSG ~info
+        (str "Illegal tactic application: got " ++
+         str (string_of_int extra_args) ++
+         str " extra " ++ str (String.plural extra_args "argument") ++
+         str ".")
+    | VRec(_,_) ->
+      let info = Exninfo.reify () in
+      fail ~info
+  else
+    let info = Exninfo.reify () in
+    fail ~info
 
 (* Gives the tactic corresponding to the tactic value *)
 and tactic_of_value ist vle =
@@ -1335,7 +1368,8 @@ and tactic_of_value ist vle =
      let givenargs =
        List.map (fun (arg,_) -> Names.Id.to_string arg) (Names.Id.Map.bindings vmap) in
      let numgiven = List.length givenargs in
-     Tacticals.New.tclZEROMSG
+     let info = Exninfo.reify () in
+     Tacticals.New.tclZEROMSG ~info
        (Pp.str tactic_nm ++ Pp.str " was not fully applied:" ++ spc() ++
           (match numargs with
             0 -> assert false
@@ -1353,11 +1387,15 @@ and tactic_of_value ist vle =
           | _ ->
              Pp.str "arguments were provided for variables " ++
                pr_enum Pp.str givenargs ++ Pp.str ".")
-  | VRec _ -> Tacticals.New.tclZEROMSG (str "A fully applied tactic is expected.")
+  | VRec _ ->
+    let info = Exninfo.reify () in
+    Tacticals.New.tclZEROMSG ~info (str "A fully applied tactic is expected.")
   else if has_type vle (topwit wit_tactic) then
     let tac = out_gen (topwit wit_tactic) vle in
     tactic_of_value ist tac
-  else Tacticals.New.tclZEROMSG (str "Expression does not evaluate to a tactic.")
+  else
+    let info = Exninfo.reify () in
+    Tacticals.New.tclZEROMSG ~info (str "Expression does not evaluate to a tactic.")
 
 (* Interprets the clauses of a recursive LetIn *)
 and interp_letrec ist llc u =
@@ -1551,10 +1589,12 @@ and interp_ltac_constr ist e : EConstr.t Ftactic.t =
           pr_econstr_env env sigma cresult)
     end <*>
     Ftactic.return cresult
-  with CannotCoerceTo _ ->
+  with CannotCoerceTo _ as exn ->
+    let _, info = Exninfo.capture exn in
     let env = Proofview.Goal.env gl in
-    Tacticals.New.tclZEROMSG (str "Must evaluate to a closed term" ++ fnl() ++
-      str "offending expression: " ++ fnl() ++ pr_inspect env e result)
+    Tacticals.New.tclZEROMSG ~info
+      (str "Must evaluate to a closed term" ++ fnl() ++
+       str "offending expression: " ++ fnl() ++ pr_inspect env e result)
   end
 
 
@@ -1895,8 +1935,7 @@ module Value = struct
     let closure = VFun (UnnamedAppl,extract_trace ist, ist.lfun, [], tac) in
     of_tacvalue closure
 
-  (** Apply toplevel tactic values *)
-  let apply (f : value) (args: value list) =
+  let apply_expr f args =
     let fold arg (i, vars, lfun) =
       let id = Id.of_string ("x" ^ string_of_int i) in
       let x = Reference (ArgVar CAst.(make id)) in
@@ -1905,8 +1944,17 @@ module Value = struct
     let (_, args, lfun) = List.fold_right fold args (0, [], Id.Map.empty) in
     let lfun = Id.Map.add (Id.of_string "F") f lfun in
     let ist = { (default_ist ()) with lfun = lfun; } in
-    let tac = TacArg(CAst.make @@ TacCall (CAst.make (ArgVar CAst.(make @@ Id.of_string "F"),args))) in
+    ist, TacArg(CAst.make @@ TacCall (CAst.make (ArgVar CAst.(make @@ Id.of_string "F"),args)))
+
+
+  (** Apply toplevel tactic values *)
+  let apply (f : value) (args: value list) =
+    let ist, tac = apply_expr f args in
     eval_tactic_ist ist tac
+
+  let apply_val (f : value) (args: value list) =
+    let ist, tac = apply_expr f args in
+    val_interp ist tac
 
 end
 
@@ -2014,6 +2062,7 @@ let interp_pre_ident ist env sigma s =
 
 let () =
   register_interp0 wit_int_or_var (fun ist n -> Ftactic.return (interp_int_or_var ist n));
+  register_interp0 wit_smart_global (lift interp_reference);
   register_interp0 wit_ref (lift interp_reference);
   register_interp0 wit_pre_ident (lift interp_pre_ident);
   register_interp0 wit_ident (lift interp_ident);

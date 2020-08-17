@@ -14,7 +14,6 @@ open CAst
 open Pattern
 open Genredexpr
 open Glob_term
-open Tacred
 open Util
 open Names
 open Libnames
@@ -95,9 +94,22 @@ let intern_string_or_var = intern_or_var (fun (s : string) -> s)
 let intern_global_reference ist qid =
   if qualid_is_ident qid && find_var (qualid_basename qid) ist then
     ArgVar (make ?loc:qid.CAst.loc @@ qualid_basename qid)
+  else if qualid_is_ident qid && find_hyp (qualid_basename qid) ist then
+    let id = qualid_basename qid in
+    ArgArg (qid.CAst.loc, GlobRef.VarRef id)
   else
-    try ArgArg (qid.CAst.loc,locate_global_with_alias qid)
-    with Not_found -> Nametab.error_global_not_found qid
+    let r =
+      try locate_global_with_alias ~head:true qid
+      with
+      | Not_found as exn ->
+        if not !strict_check && qualid_is_ident qid then
+          let id = qualid_basename qid in
+          GlobRef.VarRef id
+        else
+          let _, info = Exninfo.capture exn in
+          Nametab.error_global_not_found ~info qid
+    in
+    ArgArg (qid.CAst.loc, r)
 
 let intern_ltac_variable ist qid =
   if qualid_is_ident qid && find_var (qualid_basename qid) ist then
@@ -142,9 +154,10 @@ let intern_isolated_tactic_reference strict ist qid =
   with Not_found ->
   (* Tolerance for compatibility, allow not to use "constr:" *)
   try ConstrMayEval (ConstrTerm (intern_constr_reference strict ist qid))
-  with Not_found ->
-  (* Reference not found *)
-  Nametab.error_global_not_found qid
+  with Not_found as exn ->
+    (* Reference not found *)
+    let _, info = Exninfo.capture exn in
+    Nametab.error_global_not_found ~info qid
 
 (* Internalize an applied tactic reference *)
 
@@ -161,9 +174,10 @@ let intern_applied_tactic_reference ist qid =
   with Not_found ->
   (* A global tactic *)
   try intern_applied_global_tactic_reference qid
-  with Not_found ->
-  (* Reference not found *)
-  Nametab.error_global_not_found qid
+  with Not_found as exn ->
+    (* Reference not found *)
+    let _, info = Exninfo.capture exn in
+    Nametab.error_global_not_found ~info qid
 
 (* Intern a reference parsed in a non-tactic entry *)
 
@@ -176,7 +190,7 @@ let intern_non_tactic_reference strict ist qid =
   with Not_found ->
   (* Tolerance for compatibility, allow not to use "ltac:" *)
   try intern_isolated_global_tactic_reference qid
-  with Not_found ->
+  with Not_found as exn ->
   (* By convention, use IntroIdentifier for unbound ident, when not in a def *)
   if qualid_is_ident qid && not strict then
     let id = qualid_basename qid in
@@ -184,7 +198,8 @@ let intern_non_tactic_reference strict ist qid =
     TacGeneric ipat
   else
     (* Reference not found *)
-    Nametab.error_global_not_found qid
+    let _, info = Exninfo.capture exn in
+    Nametab.error_global_not_found ~info qid
 
 let intern_message_token ist = function
   | (MsgString _ | MsgInt _ as x) -> x
@@ -287,38 +302,42 @@ let intern_destruction_arg ist = function
       else
         clear,ElimOnIdent (make ?loc id)
 
-let short_name = function
-  | {v=AN qid} when qualid_is_ident qid && not !strict_check ->
+let short_name qid =
+  if qualid_is_ident qid && not !strict_check then
     Some (make ?loc:qid.CAst.loc @@ qualid_basename qid)
-  | _ -> None
+  else None
 
-let intern_evaluable_global_reference ist qid =
-  try evaluable_of_global_reference ist.genv (locate_global_with_alias ~head:true qid)
-  with Not_found ->
-  if qualid_is_ident qid && not !strict_check then EvalVarRef (qualid_basename qid)
-  else Nametab.error_global_not_found qid
+let evalref_of_globref ?loc ?short = function
+  | GlobRef.ConstRef cst -> ArgArg (EvalConstRef cst, short)
+  | GlobRef.VarRef id -> ArgArg (EvalVarRef id, short)
+  | r ->
+    let tpe = match r with
+    | GlobRef.IndRef _ -> "inductive"
+    | GlobRef.ConstructRef _ -> "constructor"
+    | (GlobRef.VarRef _ | GlobRef.ConstRef _) -> assert false
+    in
+    user_err ?loc (str "Cannot turn" ++ spc () ++ str tpe ++ spc () ++
+      Nametab.pr_global_env Id.Set.empty r ++ spc () ++
+      str "into an evaluable reference.")
 
-let intern_evaluable_reference_or_by_notation ist = function
-  | {v=AN r} -> intern_evaluable_global_reference ist r
+let intern_evaluable ist = function
+  | {v=AN qid} ->
+    begin match intern_global_reference ist qid with
+    | ArgVar _ as v -> v
+    | ArgArg (loc, r) ->
+      let short = short_name qid in
+      evalref_of_globref ?loc ?short r
+    end
   | {v=ByNotation (ntn,sc);loc} ->
-      evaluable_of_global_reference ist.genv
-      (Notation.interp_notation_as_global_reference ?loc
-        GlobRef.(function ConstRef _ | VarRef _ -> true | _ -> false) ntn sc)
+    let check = GlobRef.(function ConstRef _ | VarRef _ -> true | _ -> false) in
+    let r = Notation.interp_notation_as_global_reference ?loc ~head:true check ntn sc in
+    evalref_of_globref ?loc r
 
-(* Globalize a reduction expression *)
-let intern_evaluable ist r =
-  let f ist r =
-    let e = intern_evaluable_reference_or_by_notation ist r in
-    let na = short_name r in
-    ArgArg (e,na)
-  in
-  match r with
-  | {v=AN qid} when qualid_is_ident qid && find_var (qualid_basename qid) ist ->
-    ArgVar (make ?loc:qid.CAst.loc @@ qualid_basename qid)
-  | {v=AN qid} when qualid_is_ident qid && not !strict_check && find_hyp (qualid_basename qid) ist ->
-    let id = qualid_basename qid in
-      ArgArg (EvalVarRef id, Some (make ?loc:qid.CAst.loc id))
-  | _ -> f ist r
+let intern_smart_global ist = function
+  | {v=AN r} -> intern_global_reference ist r
+  | {v=ByNotation (ntn,sc);loc} ->
+      ArgArg (loc, (Notation.interp_notation_as_global_reference ?loc ~head:true
+        GlobRef.(function ConstRef _ | VarRef _ -> true | _ -> false) ntn sc))
 
 let intern_unfold ist (l,qid) = (l,intern_evaluable ist qid)
 
@@ -380,10 +399,10 @@ let intern_typed_pattern_or_ref_with_occurrences ist (l,p) =
       let c = Constrintern.interp_reference sign r in
       match DAst.get c with
       | GRef (r,None) ->
-          Inl (ArgArg (evaluable_of_global_reference ist.genv r,None))
+          Inl (evalref_of_globref r)
       | GVar id ->
-          let r = evaluable_of_global_reference ist.genv (GlobRef.VarRef id) in
-          Inl (ArgArg (r,None))
+          let r = evalref_of_globref (GlobRef.VarRef id) in
+          Inl r
       | _ ->
           let bound_names = Glob_ops.bound_glob_vars c in
           Inr (bound_names,(c,None),dummy_pat) in
@@ -813,6 +832,7 @@ let intern_ltac ist tac =
 
 let () =
   Genintern.register_intern0 wit_int_or_var (lift intern_int_or_var);
+  Genintern.register_intern0 wit_smart_global (lift intern_smart_global);
   Genintern.register_intern0 wit_ref (lift intern_global_reference);
   Genintern.register_intern0 wit_pre_ident (fun ist c -> (ist,c));
   Genintern.register_intern0 wit_ident intern_ident';

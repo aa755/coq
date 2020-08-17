@@ -1,3 +1,5 @@
+.. |GtkSourceView| replace:: :smallcaps:`GtkSourceView`
+
 .. _coqintegrateddevelopmentenvironment:
 
 |Coq| Integrated Development Environment
@@ -98,19 +100,6 @@ processed color, though their preceding proofs have the processed color.
 Notice that for all these buttons, except for the "gears" button, their operations
 are also available in the menu, where their keyboard shortcuts are given.
 
-Proof folding
-------------------
-
-As your script grows bigger and bigger, it might be useful to hide the
-proofs of your theorems and lemmas.
-
-This feature is toggled via the Hide entry of the Navigation menu. The
-proof shall be enclosed between ``Proof.`` and ``Qed.``, both with their final
-dots. The proof that shall be hidden or revealed is the first one
-whose beginning statement (such as ``Theorem``) precedes the insertion
-cursor.
-
-
 Vernacular commands, templates
 -----------------------------------
 
@@ -158,7 +147,18 @@ presented as a notebook.
 The first section is for selecting the text font used for scripts,
 goal and message windows.
 
-The second and third sections are for controlling colors and style.
+The second and third sections are for controlling colors and style of
+the three main buffers. A predefined |Coq| highlighting style as well
+as standard |GtkSourceView| styles are available. Other styles can be
+added e.g. in ``$HOME/.local/share/gtksourceview-3.0/styles/`` (see
+the general documentation about |GtkSourceView| for the various
+possibilities). Note that the style of the rest of graphical part of
+Coqide is not under the control of |GtkSourceView| but of GTK+ and
+governed by files such as ``settings.ini`` and ``gtk.css`` in
+``$XDG_CONFIG_HOME/gtk-3.0`` or files in
+``$HOME/.themes/NameOfTheme/gtk-3.0``, as well as the environment
+variable ``GTK_THEME`` (search on internet for the various
+possibilities).
 
 The fourth section is for customizing the editor. It includes in
 particular the ability to activate an Emacs mode named
@@ -206,7 +206,7 @@ Displaying Unicode symbols
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You just need to define suitable notations as described in the chapter
-:ref:`syntaxextensionsandinterpretationscopes`. For example, to use the
+:ref:`syntax-extensions-and-notation-scopes`. For example, to use the
 mathematical symbols ∀ and ∃, you may define:
 
 .. coqtop:: in

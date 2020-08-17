@@ -921,6 +921,69 @@ function make_gtk_sourceview3 {
   build_conf_make_inst  https://download.gnome.org/sources/gtksourceview/3.24  gtksourceview-3.24.11  tar.xz  make_arch_pkg_config
 }
 
+##### FLEXDLL FLEXLINK #####
+
+# Note: there is a circular dependency between flexlink and ocaml (resolved in Ocaml 4.03.)
+# For MinGW it is not even possible to first build an Ocaml without flexlink support,
+# Because Makefile.nt doesn't support this. So we have to use a binary flexlink.
+# One could of cause do a bootstrap run ...
+
+# Install flexdll objects
+
+function install_flexdll {
+  cp flexdll.h "$PREFIXMINGW/include"
+  if [ "$TARGET_ARCH" == "i686-w64-mingw32" ]; then
+    cp flexdll*_mingw.o "/usr/$TARGET_ARCH/bin"
+    cp flexdll*_mingw.o "$PREFIXOCAML/bin"
+  elif [ "$TARGET_ARCH" == "x86_64-w64-mingw32" ]; then
+    cp flexdll*_mingw64.o "/usr/$TARGET_ARCH/bin"
+    cp flexdll*_mingw64.o "$PREFIXOCAML/bin"
+  else
+    echo "Unknown target architecture"
+    return 1
+  fi
+}
+
+# Install flexlink
+
+function install_flexlink {
+  cp flexlink.exe "/usr/$TARGET_ARCH/bin"
+
+  cp flexlink.exe "$PREFIXOCAML/bin"
+}
+
+# Get binary flexdll flexlink for building OCaml
+# An alternative is to first build an OCaml without shared library support and build flexlink with it
+
+function get_flex_dll_link_bin {
+  if build_prep https://github.com/alainfrisch/flexdll/releases/download/0.37/ flexdll-bin-0.37 zip 1 ; then
+    install_flexdll
+    install_flexlink
+    build_post
+  fi
+}
+
+# Build flexdll and flexlink from sources after building OCaml
+
+function make_flex_dll_link {
+  if build_prep https://github.com/alainfrisch/flexdll/archive 0.37 tar.gz 1 flexdll-0.37 ; then
+    if [ "$TARGET_ARCH" == "i686-w64-mingw32" ]; then
+      # shellcheck disable=SC2086
+      log1 make $MAKE_OPT build_mingw flexlink.exe
+    elif [ "$TARGET_ARCH" == "x86_64-w64-mingw32" ]; then
+      # shellcheck disable=SC2086
+      log1 make $MAKE_OPT build_mingw64 flexlink.exe
+    else
+      echo "Unknown target architecture"
+      return 1
+    fi
+    install_flexdll
+    install_flexlink
+    log2 make clean
+    build_post
+  fi
+}
+
 ##### LN replacement #####
 
 # Note: this does support symlinks, but symlinks require special user rights on Windows.
@@ -953,22 +1016,39 @@ function make_arch_pkg_config {
 ##### OCAML #####
 
 function make_ocaml {
-  if build_prep https://github.com/ocaml/ocaml/archive 4.08.1 tar.gz 1 ocaml-4.08.1 ; then
-    # see https://github.com/ocaml/ocaml/blob/4.08/README.win32.adoc
+  get_flex_dll_link_bin
+  if build_prep https://github.com/ocaml/ocaml/archive 4.07.1 tar.gz 1 ocaml-4.07.1 ; then
+    # See README.win32.adoc
+    cp config/m-nt.h byterun/caml/m.h
+    cp config/s-nt.h byterun/caml/s.h
+    if [ "$TARGET_ARCH" == "i686-w64-mingw32" ]; then
+        cp config/Makefile.mingw config/Makefile
+    elif [ "$TARGET_ARCH" == "x86_64-w64-mingw32" ]; then
+        cp config/Makefile.mingw64 config/Makefile
+    else
+        echo "Unknown target architecture"
+        return 1
+    fi
 
-    # get flexdll sources into folder ./flexdll
-    get_expand_source_tar https://github.com/alainfrisch/flexdll/archive 0.37 tar.gz 1 flexdll-0.37 flexdll
+    # Prefix is fixed in make file - replace it with the real one
+    # TODO: this might not work if PREFIX contains spaces
+    sed -i "s|^PREFIX=.*|PREFIX=$PREFIXOCAML|" config/Makefile
 
     # We don't want to mess up Coq's directory structure so put the OCaml library in a separate folder
-    logn configure ./configure --build=i686-pc-cygwin --host="$TARGET_ARCH" --prefix="$PREFIXOCAML" --libdir="$PREFIXOCAML/libocaml"
+    # If we refer to the make variable ${PREFIX} below, camlp5 ends up having the wrong path:
+    # D:\bin\coq64_buildtest_abs_ocaml4\bin>ocamlc -where => D:/bin/coq64_buildtest_abs_ocaml4/libocaml
+    # D:\bin\coq64_buildtest_abs_ocaml4\bin>camlp4 -where => ${PREFIX}/libocaml\camlp4
+    # So we put an explicit path in there
+    sed -i "s|^LIBDIR=.*|LIBDIR=$PREFIXOCAML/libocaml|" config/Makefile
 
-    log2 make flexdll $MAKE_OPT
-    # Note the next command might change after 4.09.x to just make
-    # see        https://github.com/ocaml/ocaml/blob/4.09/README.win32.adoc
-    # compare to https://github.com/ocaml/ocaml/blob/4.10/README.win32.adoc
-    log2 make world.opt $MAKE_OPT
-    log2 make flexlink.opt $MAKE_OPT
-    log2 make install $MAKE_OPT
+    # Note: ocaml doesn't support -j 8, so don't pass MAKE_OPT
+    # I verified that 4.02.3 still doesn't support parallel build
+    log2 make world -f Makefile.nt
+    log2 make bootstrap -f Makefile.nt
+    log2 make opt -f Makefile.nt
+    log2 make opt.opt -f Makefile.nt
+    log2 make install -f Makefile.nt
+    # TODO log2 make clean -f Makefile.nt Temporarily disabled for ocamlbuild development
 
     # Move license files and other into into special folder
     if [ "$INSTALLMODE" == "absolute" ] || [ "$INSTALLMODE" == "relocatable" ]; then
@@ -983,8 +1063,18 @@ function make_ocaml {
       cp Changes      "$PREFIXOCAML/license_readme/ocaml/Changes.txt"
     fi
 
+    # Since 4.07 this library is part of ocaml
+    mkdir -p "$PREFIXOCAML/libocaml/site-lib/seq/"
+    cat > "$PREFIXOCAML/libocaml/site-lib/seq/META" <<EOT
+name="seq"
+version="[distributed with OCaml 4.07 or above]"
+description="dummy backward-compatibility package for iterators"
+requires=""
+EOT
+
     build_post
   fi
+  make_flex_dll_link
 }
 
 ##### OCAML EXTRA TOOLS #####
@@ -1018,7 +1108,7 @@ function make_num {
 
 function make_ocamlbuild {
   make_ocaml
-  if build_prep https://github.com/ocaml/ocamlbuild/archive 0.14.0 tar.gz 1 ocamlbuild-0.14.0; then
+  if build_prep https://github.com/ocaml/ocamlbuild/archive 0.12.0 tar.gz 1 ocamlbuild-0.12.0; then
     log2 make configure OCAML_NATIVE=true OCAMLBUILD_PREFIX=$PREFIXOCAML OCAMLBUILD_BINDIR=$PREFIXOCAML/bin OCAMLBUILD_LIBDIR=$PREFIXOCAML/lib
     log1 make $MAKE_OPT
     log2 make install
@@ -1031,7 +1121,6 @@ function make_ocamlbuild {
 function make_findlib {
   make_ocaml
   make_ocamlbuild
-  # Note: latest is 1.8.1 but http://projects.camlcity.org/projects/dl/findlib-1.8.1/doc/README says this is for OCaml 4.09
   if build_prep https://opam.ocaml.org/1.2.2/archives ocamlfind.1.8.0+opam tar.gz 1 ; then
     logn configure ./configure -bindir "$PREFIXOCAML\\bin" -sitelib "$PREFIXOCAML\\libocaml\\site-lib" -config "$PREFIXOCAML\\etc\\findlib.conf"
     # Note: findlib doesn't support -j 8, so don't pass MAKE_OPT
@@ -1078,11 +1167,10 @@ function make_menhir {
   make_ocaml
   make_findlib
   make_ocamlbuild
-  # This is the version required by latest CompCert
-  if build_prep https://gitlab.inria.fr/fpottier/menhir/-/archive/20190626 menhir-20190626 tar.gz 1 ; then
-    # Note: menhir doesn't support -j 8, so don't pass MAKE_OPT
-    log2 make all PREFIX="$PREFIXOCAML"
-    log2 make install PREFIX="$PREFIXOCAML"
+  if build_prep https://gitlab.inria.fr/fpottier/menhir/-/archive/20200525 menhir-20200525 tar.gz 1 ; then
+    # ToDo: don't know if this is the intended / most reliable to do it, but it works
+    log2 dune build @install
+    log2 dune install menhir menhirSdk menhirLib
     build_post
   fi
 }
@@ -1093,13 +1181,14 @@ function make_camlp5 {
   make_ocaml
   make_findlib
 
-  if build_prep https://github.com/camlp5/camlp5/archive rel707 tar.gz 1 camlp5-rel707; then
+  if build_prep https://github.com/camlp5/camlp5/archive rel711 tar.gz 1 camlp5-rel711; then
     logn configure ./configure
     # Somehow my virus scanner has the boot.new/SAVED directory locked after the move for a second => repeat until success
     sed -i 's/mv boot.new boot/until mv boot.new boot; do sleep 1; done/' Makefile
     # shellcheck disable=SC2086
     log1 make world.opt $MAKE_OPT
     log2 make install
+    cp lib/*.a "$PREFIXOCAML/libocaml/camlp5/"
     log2 make clean
     # For some reason META is not built / copied, but it is required
     log2 make -C etc META
@@ -1152,6 +1241,47 @@ function make_lablgtk {
     # log2 dune clean
     build_post
   fi
+}
+
+##### Elpi #####
+
+function make_seq {
+  make_ocaml
+  # since 4.07 this package is part of ocaml
+
+}
+
+function make_re {
+  make_ocaml
+  make_dune
+  make_seq
+
+  if build_prep https://github.com/ocaml/ocaml-re/archive 1.9.0 tar.gz 1 ocaml-re; then
+
+    log2 dune build -p re
+    log2 dune install re
+
+    build_post
+  fi
+
+}
+
+function make_elpi {
+  make_ocaml
+  make_findlib
+  make_camlp5
+  make_dune
+  make_re
+
+  if build_prep https://github.com/LPCIC/elpi/archive v1.11.0 tar.gz 1 elpi; then
+
+    log2 dune build -p elpi
+    log2 dune install elpi
+
+    build_post
+
+  fi
+
 }
 
 ##### COQ #####
@@ -1350,10 +1480,6 @@ function make_coq {
     else
       logn configure ./configure -with-doc no -prefix "$PREFIXCOQ"
     fi
-
-    # The windows resource compiler binary name is hard coded
-    sed -i "s/i686-w64-mingw32-windres/$TARGET_ARCH-windres/" Makefile.build
-    sed -i "s/i686-w64-mingw32-windres/$TARGET_ARCH-windres/" Makefile.ide || true
 
     # 8.4x doesn't support parallel make
     if [[ $COQ_VERSION == 8.4* ]] ; then
@@ -1625,7 +1751,7 @@ function make_addon_unicoq {
   installer_addon_dependency unicoq
   if build_prep_overlay unicoq; then
     installer_addon_section unicoq "Unicoq" "Coq plugin for an enhanced unification algorithm" ""
-    log1 coq_makefile -f Make -o Makefile
+    log1 coq_makefile -f _CoqProject -o Makefile
     log1 make $MAKE_OPT
     log2 make install
     build_post
@@ -1661,10 +1787,8 @@ function make_addon_menhir {
       touch "$FLAGFILES/menhir-addon.started"
       # Menhir executable
       install_glob "$PREFIXOCAML/bin" 'menhir.exe' "$PREFIXCOQ/bin/"
-      # Menhir Standard library
-      install_glob "$PREFIXOCAML/share/menhir/" '*.mly' "$PREFIXCOQ/share/menhir/"
       # Menhir PDF doc
-      install_glob "$PREFIXOCAML/share/doc/menhir/" '*.pdf' "$PREFIXCOQ/doc/menhir/"
+      install_glob "$PREFIXOCAML/doc/menhir/" '*.pdf' "$PREFIXCOQ/doc/menhir/"
       touch "$FLAGFILES/menhir-addon.finished"
       LOGTARGET=other
       installer_addon_end
@@ -1679,7 +1803,8 @@ function make_addon_menhirlib {
   if build_prep_overlay menhirlib; then
     installer_addon_section menhirlib "Menhirlib" "Coq support library for using Menhir generated parsers in Coq" ""
     # The supplied makefiles don't work in any way on cygwin
-    cd src
+    # ToDo: dune also doesn't seem to work for the coq files
+    cd coq-menhirlib/src
     echo -R . MenhirLib > _CoqProject
     ls -1 *.v >> _CoqProject
     log1 coq_makefile -f _CoqProject -o Makefile.coq
@@ -1695,8 +1820,9 @@ function make_addon_compcert {
   installer_addon_dependency_beg compcert
   make_menhir
   make_addon_menhirlib
+  make_addon_flocq
   installer_addon_dependency_end
-  if build_prep_overlay compcert; then
+  if build_prep_overlay compcert_platform compcert; then
     installer_addon_section compcert "CompCert" "ATTENTION: THIS IS NOT OPEN SOURCE! CompCert verified C compiler and Clightgen (required for using VST for your own code)" "off"
     logn configure ./configure -ignore-coq-version -clightgen -prefix "$PREFIXCOQ" -coqdevdir "$PREFIXCOQ/lib/coq/user-contrib/compcert" x86_32-cygwin
     log1 make $MAKE_OPT
@@ -1709,50 +1835,16 @@ function make_addon_compcert {
 
 # Princeton VST
 
-function install_addon_vst {
-    VSTDEST="$PREFIXCOQ/lib/coq/user-contrib/VST"
-
-    # Install VST .v, .vo, .c and .h files
-    install_rec compcert '*.v' "$VSTDEST/compcert/"
-    install_rec compcert '*.vo' "$VSTDEST/compcert/"
-    install_glob "msl" '*.v' "$VSTDEST/msl/"
-    install_glob "msl" '*.vo' "$VSTDEST/msl/"
-    install_glob "sepcomp" '*.v' "$VSTDEST/sepcomp/"
-    install_glob "sepcomp" '*.vo' "$VSTDEST/sepcomp/"
-    install_glob "floyd" '*.v' "$VSTDEST/floyd/"
-    install_glob "floyd" '*.vo' "$VSTDEST/floyd/"
-    install_glob "progs" '*.v' "$VSTDEST/progs/"
-    install_glob "progs" '*.c' "$VSTDEST/progs/"
-    install_glob "progs" '*.h' "$VSTDEST/progs/"
-    install_glob "veric" '*.v' "$VSTDEST/veric/"
-    install_glob "veric" '*.vo' "$VSTDEST/veric/"
-
-    # Install VST documentation files
-    install_glob "." 'LICENSE' "$VSTDEST"
-    install_glob "." '*.md' "$VSTDEST"
-    install_glob "compcert" '*' "$VSTDEST/compcert"
-    install_glob "doc" '*.pdf' "$VSTDEST/doc"
-
-    # Install VST _CoqProject files
-    install_glob "." '_CoqProject*' "$VSTDEST"
-    install_glob "." '_CoqProject-export' "$VSTDEST/progs"
-}
-
-function vst_patch_compcert_refs {
-  find . -type f -name '*.v' -print0 | xargs -0 sed -E -i \
-    -e 's/(Require\s+(Import\s+|Export\s+)*)compcert\./\1VST.compcert./g' \
-    -e 's/From compcert Require/From VST.compcert Require/g'
-}
-
 function make_addon_vst {
-  installer_addon_dependency vst
-  if build_prep_overlay vst; then
+  installer_addon_dependency_beg vst
+  make_addon_compcert
+  installer_addon_dependency_end
+  if build_prep_overlay vst_platform vst; then
     installer_addon_section vst "VST" "ATTENTION: SOME INCLUDED COMPCERT PARTS ARE NOT OPEN SOURCE! Verified Software Toolchain for verifying C code" "off"
     # log1 coq_set_timeouts_1000
-    log1 vst_patch_compcert_refs
     # The usage of the shell variable ARCH in VST collides with the usage in this shellscript
     logn make env -u ARCH make IGNORECOQVERSION=true $MAKE_OPT
-    log1 install_addon_vst
+    logn install env -u ARCH make install
     build_post
   fi
 }
@@ -1765,7 +1857,7 @@ function make_addon_coquelicot {
   installer_addon_dependency_end
   if build_prep_overlay coquelicot; then
     installer_addon_section coquelicot "Coquelicot" "Coq library for real analysis" ""
-    logn autogen ./autogen.sh
+    log1 autoreconf -i -s
     logn configure ./configure --libdir="$PREFIXCOQ/lib/coq/user-contrib/Coquelicot"
     logn remake ./remake
     logn remake-install ./remake install
@@ -1829,9 +1921,9 @@ function make_addon_quickchick {
 # Flocq: Floating point library
 
 function make_addon_flocq {
-  if build_prep_overlay Flocq; then
+  if build_prep_overlay flocq; then
     installer_addon_section flocq "Flocq" "Coq library for floating point arithmetic" ""
-    logn autogen ./autogen.sh
+    log1 autoreconf
     logn configure ./configure
     logn remake ./remake --jobs=$MAKE_THREADS
     logn install ./remake install
@@ -1850,7 +1942,7 @@ function make_addon_interval {
   installer_addon_dependency_end
   if build_prep_overlay interval; then
     installer_addon_section interval "Interval" "Coq library and tactic for proving real inequalities" ""
-    logn autogen ./autogen.sh
+    log1 autoreconf
     logn configure ./configure
     logn remake ./remake --jobs=$MAKE_THREADS
     logn install ./remake install
@@ -1879,7 +1971,9 @@ function make_addon_gappa_tool {
   install_boost
   if build_prep_overlay gappa_tool; then
     installer_addon_section gappa_tool "Gappa tool" "Stand alone tool for automated generation of numerical arithmetic proofs" ""
-    logn autogen ./autogen.sh
+    log1 autoreconf
+    # Note: configure.in seems to reference this file
+    touch stamp-config_h.in
     logn configure ./configure --build="$HOST" --host="$HOST" --target="$TARGET" --prefix="$PREFIXCOQ"
     logn remake ./remake --jobs=$MAKE_THREADS
     logn install ./remake -d install
@@ -1896,10 +1990,40 @@ function make_addon_gappa {
   installer_addon_dependency_end
   if build_prep_overlay gappa_plugin ; then
     installer_addon_section gappa "Gappa plugin" "Coq plugin for the Gappa tool" ""
-    logn autogen ./autogen.sh
+    log1 autoreconf
     logn configure ./configure
     logn remake ./remake
     logn install ./remake install
+    build_post
+  fi
+}
+
+# Elpi: extension language for Coq based. It lets one define commands in tactics
+# in a high level programming language with support for binders and unification
+# variables.
+
+function make_addon_elpi {
+  make_elpi
+  installer_addon_dependency elpi
+  if build_prep_overlay elpi ; then
+    installer_addon_section elpi "Elpi extension language" "Coq plugin for the Elpi extension language" ""
+    logn build make
+    logn installe make install
+    build_post
+  fi
+}
+
+# Hierarchy Builder: high level language to declare a hierarchy of structures
+# compiled down to records and canonical structures.
+
+function make_addon_HB {
+  installer_addon_dependency_beg elpi_hb
+  make_addon_elpi
+  installer_addon_dependency_end
+  if build_prep_overlay elpi_hb ; then
+    installer_addon_section elpi_hb "Hierarchy Builder" "Coq library to declare algebraic hierarchies" ""
+    logn build make
+    logn install make install VFILES=structures.v
     build_post
   fi
 }

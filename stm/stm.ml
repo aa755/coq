@@ -1928,8 +1928,7 @@ end = struct (* {{{ *)
          List.for_all (Context.Named.Declaration.for_all is_ground)
                       Evd.(evar_context g))
        then
-         CErrors.user_err ~hdr:"STM" Pp.(strbrk("the par: goal selector supports ground "^
-           "goals only"))
+         CErrors.user_err ~hdr:"STM" Pp.(strbrk("The par: goal selector does not support goals with existential variables"))
        else begin
         let (i, ast) = r_ast in
         PG_compat.map_proof (fun p -> Proof.focus focus_cond () i p);
@@ -1946,10 +1945,15 @@ end = struct (* {{{ *)
         | Evd.Evar_empty -> RespNoProgress
         | Evd.Evar_defined t ->
             let t = Evarutil.nf_evar sigma t in
-            if Evarutil.is_ground_term sigma t then
+            let evars = Evarutil.undefined_evars_of_term sigma t in
+            if Evar.Set.is_empty evars then
               let t = EConstr.Unsafe.to_constr t in
               RespBuiltSubProof (t, Evd.evar_universe_context sigma)
-            else CErrors.user_err ~hdr:"STM" Pp.(str"The solution is not ground")
+            else
+              CErrors.user_err ~hdr:"STM"
+                Pp.(str"The par: selector requires a tactic that makes no progress or fully" ++
+                    str" solves the goal and leaves no unresolved existential variables. The following" ++
+                    str" existentials remain unsolved: " ++ prlist (Termops.pr_existential_key sigma) (Evar.Set.elements evars))
        end) ()
     with e when CErrors.noncritical e -> RespError (CErrors.print e)
 
@@ -2023,12 +2027,16 @@ end = struct (* {{{ *)
           match Future.join f with
           | Some (pt, uc) ->
             let sigma, env = PG_compat.get_current_context () in
+            let push_state ctx =
+              Proofview.tclEVARMAP >>= fun sigma ->
+              Proofview.Unsafe.tclEVARS (Evd.merge_universe_context sigma ctx)
+            in
             stm_pperr_endline (fun () -> hov 0 (
               str"g=" ++ int (Evar.repr gid) ++ spc () ++
               str"t=" ++ (Printer.pr_constr_env env sigma pt) ++ spc () ++
               str"uc=" ++ Termops.pr_evar_universe_context uc));
             (if abstract then Abstract.tclABSTRACT None else (fun x -> x))
-              (V82.tactic (Refiner.tclPUSHEVARUNIVCONTEXT uc) <*>
+              (push_state uc <*>
               Tactics.exact_no_check (EConstr.of_constr pt))
           | None ->
             if solve then Tacticals.New.tclSOLVE [] else tclUNIT ()
@@ -2572,6 +2580,21 @@ end (* }}} *)
 (******************************************************************************)
 
 (** STM initialization options: *)
+
+type option_command = OptionSet of string option | OptionUnset
+
+type injection_command =
+  | OptionInjection of (Goptions.option_name * option_command)
+  (** Set flags or options before the initial state is ready. *)
+  | RequireInjection of (string * string option * bool option)
+  (** Require libraries before the initial state is
+     ready. Parameters follow [Library], that is to say,
+     [lib,prefix,import_export] means require library [lib] from
+     optional [prefix] and [import_export] if [Some false/Some true]
+     is used.  *)
+  (* -load-vernac-source interleaving is not supported yet *)
+  (* | LoadInjection of (string * bool) *)
+
 type stm_init_options =
   { doc_type : stm_doc_type
   (** The STM does set some internal flags differently depending on
@@ -2585,12 +2608,9 @@ type stm_init_options =
   (** [vo] load paths for the document. Usually extracted from -R
      options / _CoqProject *)
 
-  ; require_libs : (string * string option * bool option) list
-  (** Require [require_libs] before the initial state is
-     ready. Parameters follow [Library], that is to say,
-     [lib,prefix,import_export] means require library [lib] from
-     optional [prefix] and [import_export] if [Some false/Some true]
-     is used.  *)
+  ; injections : injection_command list
+  (** Injects Require and Set/Unset commands before the initial
+     state is ready *)
 
   ; stm_options  : AsyncOpts.stm_opt
   (** Low-level STM options *)
@@ -2621,12 +2641,50 @@ let dirpath_of_file f =
   let ldir = Libnames.add_dirpath_suffix ldir0 id in
   ldir
 
-let new_doc { doc_type ; ml_load_path; vo_load_path; require_libs; stm_options } =
+let new_doc { doc_type ; ml_load_path; vo_load_path; injections; stm_options } =
 
   let require_file (dir, from, exp) =
     let mp = Libnames.qualid_of_string dir in
     let mfrom = Option.map Libnames.qualid_of_string from in
     Flags.silently (Vernacentries.vernac_require mfrom exp) [mp] in
+
+  let interp_set_option opt v old =
+    let open Goptions in
+    let err expect =
+      let opt = String.concat " " opt in
+      let got = v in (* avoid colliding with Pp.v *)
+      CErrors.user_err
+        Pp.(str "-set: " ++ str opt ++
+            str" expects " ++ str expect ++
+            str" but got " ++ str got)
+    in
+    match old with
+    | BoolValue _ ->
+      let v = match String.trim v with
+        | "true" -> true
+        | "false" | "" -> false
+        | _ -> err "a boolean"
+      in
+      BoolValue v
+    | IntValue _ ->
+      let v = String.trim v in
+      let v = match int_of_string_opt v with
+        | Some _ as v -> v
+        | None -> if v = "" then None else err "an int"
+      in
+      IntValue v
+    | StringValue _ -> StringValue v
+    | StringOptValue _ -> StringOptValue (Some v) in
+
+  let set_option = let open Goptions in function
+      | opt, OptionUnset -> unset_option_value_gen ~locality:OptLocal opt
+      | opt, OptionSet None -> set_bool_option_value_gen ~locality:OptLocal opt true
+      | opt, OptionSet (Some v) -> set_option_value ~locality:OptLocal (interp_set_option opt) opt v in
+
+  let handle_injection = function
+    | RequireInjection r -> require_file r
+    (* | LoadInjection l -> *)
+    | OptionInjection o -> set_option o in
 
   (* Set the options from the new documents *)
   AsyncOpts.cur_opt := stm_options;
@@ -2666,7 +2724,7 @@ let new_doc { doc_type ; ml_load_path; vo_load_path; require_libs; stm_options }
   end;
 
   (* Import initial libraries. *)
-  List.iter require_file require_libs;
+  List.iter handle_injection injections;
 
   (* We record the state at this point! *)
   State.define ~doc ~cache:true ~redefine:true (fun () -> ()) Stateid.initial;

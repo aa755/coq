@@ -8,7 +8,7 @@ early enough in the process for this person to be known at that point
 in time.
 
 - [ ] Create a new issue to track the release process where you can copy-paste
-  the present checklist.
+  the present checklist from `dev/doc/release-process.md`.
 - [ ] Change the version name to the next major version and the magic
   numbers (see [#7008](https://github.com/coq/coq/pull/7008/files)).
 
@@ -96,6 +96,8 @@ in time.
 - [ ] Delay non-blocking issues to the appropriate milestone and ensure
   blocking issues are solved. If required to solve some blocking issues,
   it is possible to revert some feature PRs in the version branch only.
+- [ ] Add a new link to the ``'versions'`` list of the refman (in
+      ``html_context`` in ``doc/sphinx/conf.py``).
 
 ## Before the beta release date ##
 
@@ -131,8 +133,12 @@ in time.
   the package managers can Cc `@erikmd` to request that he prepare the necessary configuration for the Docker release in [`coqorg/coq`](https://hub.docker.com/r/coqorg/coq)
   (namely, he'll need to make sure a `coq-bignums` opam package is available in [`extra-dev`](https://github.com/coq/opam-coq-archive/tree/master/extra-dev), respectively [`released`](https://github.com/coq/opam-coq-archive/tree/master/released), so the Docker image gathering `coq` and `coq-bignums` can be built).
 - [ ] Draft a release on GitHub.
-- [ ] Get `@maximedenes` to sign the Windows and MacOS packages and
-  upload them on GitHub.
+- [ ] Sign the Windows and MacOS packages and upload them on GitHub.
+  + The Windows packages must be signed by the Inria IT security service. They
+    should be sent as a link to the binary together with its SHA256 hash in a
+    signed e-mail, via our local contact (currently `@maximedenes`).
+  + The MacOS packages should be signed by our own certificate, by sending them
+    to `@maximedenes`. A detailed step-by-step guide can be found [on the wiki](https://github.com/coq/coq/wiki/SigningReleases).
 - [ ] Prepare a page of news on the website with the link to the GitHub release
   (see [coq/www#63](https://github.com/coq/www/pull/63)).
 - [ ] Upload the new version of the reference manual to the website.

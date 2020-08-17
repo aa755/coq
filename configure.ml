@@ -12,11 +12,11 @@
 #load "str.cma"
 open Printf
 
-let coq_version = "8.12+alpha"
-let coq_macos_version = "8.11.90" (** "[...] should be a string comprised of
+let coq_version = "8.12.0"
+let coq_macos_version = "8.12.0" (** "[...] should be a string comprised of
 three non-negative, period-separated integers [...]" *)
-let vo_magic = 81191
-let state_magic = 581191
+let vo_magic = 81200
+let state_magic = 581200
 let is_a_released_version = false
 let distributed_exec =
   ["coqtop.opt"; "coqidetop.opt"; "coqqueryworker.opt"; "coqproofworker.opt"; "coqtacticworker.opt";
@@ -751,10 +751,10 @@ let check_coqide () =
   if !prefs.coqide = Some No then set_ide No "CoqIde manually disabled";
   let dir, via = get_lablgtkdir () in
   if dir = ""
-  then set_ide No "LablGtk3 not found"
+  then set_ide No "LablGtk3 or LablGtkSourceView3 not found"
   else
     let (ok, version) = check_lablgtk_version () in
-    let found = sprintf "LablGtk3 found (%s)" version in
+    let found = sprintf "LablGtk3 and LablGtkSourceView3 found (%s)" version in
     if not ok then set_ide No (found^", but too old (required >= 3.0, found " ^ version ^ ")");
     (* We're now sure to produce at least one kind of coqide *)
     lablgtkdir := shorten_camllib dir;
@@ -983,7 +983,7 @@ let config_runtime () =
     ["-dllib";"-lcoqrun";"-dllpath";("\"" ^ coqtop ^ "/kernel/byterun\"")]
   | _ ->
     let ld="CAML_LD_LIBRARY_PATH" in
-    build_loadpath := sprintf "export %s:='%s/kernel/byterun':$(%s)" ld coqtop ld;
+    build_loadpath := sprintf "export %s:=%s/kernel/byterun:$(%s)" ld coqtop ld;
     ["-dllib";"-lcoqrun";"-dllpath";coqlib/"kernel/byterun"]
 
 let vmbyteflags = config_runtime ()
@@ -1059,6 +1059,7 @@ let write_configml f =
   let pr_s = pr "let %s = %S\n" in
   let pr_b = pr "let %s = %B\n" in
   let pr_i = pr "let %s = %d\n" in
+  let pr_i32 = pr "let %s = %dl\n" in
   let pr_p s o = pr "let %s = %S\n" s
     (match o with Relative s -> s | Absolute s -> s) in
   let pr_li n l = pr "let %s = [%s]\n" n (String.concat ";" (List.map string_of_int l)) in
@@ -1086,7 +1087,7 @@ let write_configml f =
   pr_s "exec_extension" exe;
   pr "let gtk_platform = `%s\n" !idearchdef;
   pr_b "has_natdynlink" hasnatdynlink;
-  pr_i "vo_magic_number" vo_magic;
+  pr_i32 "vo_version" vo_magic;
   pr_i "state_magic_number" state_magic;
   pr_s "browser" browser;
   pr_s "wwwcoq" !prefs.coqwebsite;

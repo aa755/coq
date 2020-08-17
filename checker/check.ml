@@ -119,11 +119,12 @@ let check_one_lib admit senv (dir,m) =
     if LibrarySet.mem dir admit then
       (Flags.if_verbose Feedback.msg_notice
          (str "Admitting library: " ++ pr_dirpath dir);
-       Safe_checking.unsafe_import senv md m.library_extra_univs dig)
+       Safe_checking.unsafe_import (fst senv) md m.library_extra_univs dig),
+      (snd senv)
     else
       (Flags.if_verbose Feedback.msg_notice
          (str "Checking library: " ++ pr_dirpath dir);
-       Safe_checking.import senv md m.library_extra_univs dig)
+       Safe_checking.import (fst senv) (snd senv) md m.library_extra_univs dig)
   in
     register_loaded_library m; senv
 
@@ -255,7 +256,7 @@ let try_locate_qualified_library lib = match lib with
 (*s Low-level interning of libraries from files *)
 
 let raw_intern_library f =
-  System.raw_intern_state Coq_config.vo_magic_number f
+  ObjFile.open_in ~file:f
 
 (************************************************************************)
 (* Internalise libraries *)
@@ -263,6 +264,7 @@ let raw_intern_library f =
 type summary_disk = {
   md_name : compilation_unit_name;
   md_deps : (compilation_unit_name * Safe_typing.vodigest) array;
+  md_ocaml : string;
 }
 
 module Dyn = Dyn.Make ()
@@ -294,58 +296,58 @@ type intern_mode = Rec | Root | Dep (* Rec = standard, Root = -norec, Dep = depe
 (* Dependency graph *)
 let depgraph = ref LibraryMap.empty
 
-let marshal_in_segment ~validate ~value f ch =
+let marshal_in_segment ~validate ~value ~segment f ch =
+  let () = LargeFile.seek_in ch segment.ObjFile.pos in
   if validate then
-    let v, stop, digest =
+    let v =
       try
-        let stop = input_binary_int ch in
         let v = Analyze.parse_channel ch in
         let digest = Digest.input ch in
-        v, stop, digest
+        let () = if not (String.equal digest segment.ObjFile.hash) then raise Exit in
+        v
       with _ ->
         user_err (str "Corrupted file " ++ quote (str f))
     in
     let () = Validate.validate value v in
     let v = Analyze.instantiate v in
-    Obj.obj v, stop, digest
+    Obj.obj v
   else
-    System.marshal_in_segment f ch
+    System.marshal_in f ch
 
-let skip_in_segment f ch =
-  try
-    let stop = (input_binary_int ch : int) in
-    seek_in ch stop;
-    let digest = Digest.input ch in
-    stop, digest
-  with _ ->
-    user_err (str "Corrupted file " ++ quote (str f))
-
-let marshal_or_skip ~validate ~value f ch =
+let marshal_or_skip ~validate ~value ~segment f ch =
   if validate then
-    let v, pos, digest = marshal_in_segment ~validate ~value f ch in
-    Some v, pos, digest
+    let v = marshal_in_segment ~validate:true ~value ~segment f ch in
+    Some v
   else
-    let pos, digest = skip_in_segment f ch in
-    None, pos, digest
+    None
 
 let intern_from_file ~intern_mode (dir, f) =
   let validate = intern_mode <> Dep in
   Flags.if_verbose chk_pp (str"[intern "++str f++str" ...");
   let (sd,md,table,opaque_csts,digest) =
     try
+      (* First pass to read the metadata of the file *)
       let ch = System.with_magic_number_check raw_intern_library f in
-      let (sd:summary_disk), _, digest = marshal_in_segment ~validate ~value:Values.v_libsum f ch in
-      let (md:library_disk), _, digest = marshal_in_segment ~validate ~value:Values.v_lib f ch in
-      let (opaque_csts:seg_univ option), _, udg = marshal_in_segment ~validate ~value:Values.v_univopaques f ch in
-      let (tasks:'a option), _, _ = marshal_in_segment ~validate ~value:Values.(Opt Any) f ch in
-      let (table:seg_proofs option), pos, checksum =
-        marshal_or_skip ~validate ~value:Values.v_opaquetable f ch in
+      let seg_sd = ObjFile.get_segment ch ~segment:"summary" in
+      let seg_md = ObjFile.get_segment ch ~segment:"library" in
+      let seg_univs = ObjFile.get_segment ch ~segment:"universes" in
+      let seg_tasks = ObjFile.get_segment ch ~segment:"tasks" in
+      let seg_opaque = ObjFile.get_segment ch ~segment:"opaques" in
+      let () = ObjFile.close_in ch in
+      (* Actually read the data *)
+      let ch = open_in_bin f in
+
+      let (sd:summary_disk) = marshal_in_segment ~validate ~value:Values.v_libsum ~segment:seg_sd f ch in
+      let (md:library_disk) = marshal_in_segment ~validate ~value:Values.v_lib ~segment:seg_md f ch in
+      let (opaque_csts:seg_univ option) = marshal_in_segment ~validate ~value:Values.v_univopaques ~segment:seg_univs f ch in
+      let (tasks:'a option) = marshal_in_segment ~validate ~value:Values.(Opt Any) ~segment:seg_tasks f ch in
+      let (table:seg_proofs option) =
+        marshal_or_skip ~validate ~value:Values.v_opaquetable ~segment:seg_opaque f ch in
       (* Verification of the final checksum *)
       let () = close_in ch in
       let ch = open_in_bin f in
-      if not (String.equal (Digest.channel ch pos) checksum) then
-        user_err ~hdr:"intern_from_file" (str "Checksum mismatch");
       let () = close_in ch in
+      let () = System.check_caml_version ~caml:sd.md_ocaml ~file:f in
       if dir <> sd.md_name then
         user_err ~hdr:"intern_from_file"
           (name_clash_message dir sd.md_name f);
@@ -361,8 +363,9 @@ let intern_from_file ~intern_mode (dir, f) =
       end;
       Flags.if_verbose chk_pp (str" done]" ++ fnl ());
       let digest =
-        if opaque_csts <> None then Safe_typing.Dvivo (digest,udg)
-        else (Safe_typing.Dvo_or_vi digest) in
+        let open ObjFile in
+        if opaque_csts <> None then Safe_typing.Dvivo (seg_md.hash, seg_univs.hash)
+        else (Safe_typing.Dvo_or_vi seg_md.hash) in
       sd,md,table,opaque_csts,digest
     with e -> Flags.if_verbose chk_pp (str" failed!]" ++ fnl ()); raise e in
   depgraph := LibraryMap.add sd.md_name sd.md_deps !depgraph;
@@ -433,6 +436,6 @@ let recheck_library senv ~norec ~admit ~check =
   Flags.if_verbose Feedback.msg_notice (fnl()++hv 2 (str "Ordered list:" ++ fnl() ++
     prlist
     (fun (dir,_) -> pr_dirpath dir ++ fnl()) needed));
-  let senv = List.fold_left (check_one_lib nochk) senv needed in
+  let senv = List.fold_left (check_one_lib nochk) (senv, Cmap.empty) needed in
   Flags.if_verbose Feedback.msg_notice (str"Modules were successfully checked");
   senv

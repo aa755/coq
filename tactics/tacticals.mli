@@ -151,9 +151,9 @@ module New : sig
   (* [tclFAIL n msg] fails with [msg] as an error message at level [n]
      (meaning that it will jump over [n] error catching tacticals FROM
      THIS MODULE. *)
-  val tclFAIL : int -> Pp.t -> 'a tactic
+  val tclFAIL : ?info:Exninfo.info -> int -> Pp.t -> 'a tactic
 
-  val tclZEROMSG : ?loc:Loc.t -> Pp.t -> 'a tactic
+  val tclZEROMSG : ?info:Exninfo.info -> ?loc:Loc.t -> Pp.t -> 'a tactic
   (** Fail with a [User_Error] containing the given message. *)
 
   val tclOR : unit tactic -> unit tactic -> unit tactic
@@ -180,6 +180,7 @@ module New : sig
       middle. Raises an error if the number of resulting subgoals is
       strictly less than [n+m] *)
   val tclTHENS3PARTS     : unit tactic -> unit tactic array -> unit tactic -> unit tactic array -> unit tactic
+  val tclTHENSLASTn    : unit tactic -> unit tactic -> unit tactic array -> unit tactic
   val tclTHENSFIRSTn : unit tactic -> unit tactic array -> unit tactic -> unit tactic
   val tclTHENFIRSTn : unit tactic -> unit tactic array -> unit tactic
 

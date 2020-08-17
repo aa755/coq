@@ -478,7 +478,7 @@ let error_no_relation () = user_err Pp.(str "Cannot find a relation to rewrite."
 
 let rec decompose_app_rel env evd t =
   (* Head normalize for compatibility with the old meta mechanism *)
-  let t = Reductionops.whd_betaiota evd t in
+  let t = Reductionops.whd_betaiota env evd t in
   match EConstr.kind evd t with
   | App (f, [||]) -> assert false
   | App (f, [|arg|]) ->
@@ -711,7 +711,7 @@ let unify_eqn (car, rel, prf, c1, c2, holes, sort) l2r flags env (sigma, cstrs) 
     let sigma = Typeclasses.resolve_typeclasses ~filter:(no_constraints cstrs)
       ~fail:true env sigma in
     let evd = solve_remaining_by env sigma holes by in
-    let nf c = Reductionops.nf_evar evd (Reductionops.nf_meta evd c) in
+    let nf c = Reductionops.nf_evar evd (Reductionops.nf_meta env evd c) in
     let c1 = nf c1 and c2 = nf c2
     and rew_car = nf car and rel = nf rel
     and prf = nf prf in
@@ -952,10 +952,11 @@ let fold_match env sigma c =
         then case_dep_scheme_kind_from_type
         else case_scheme_kind_from_type)
     in
-    let exists = Ind_tables.check_scheme sk ci.ci_ind in
-      if exists then
-        dep, pred, exists, Ind_tables.lookup_scheme sk ci.ci_ind
-      else raise Not_found
+    match Ind_tables.lookup_scheme sk ci.ci_ind with
+    | Some cst ->
+        dep, pred, true, cst
+    | None ->
+      raise Not_found
   in
   let app =
     let ind, args = Inductiveops.find_mrectype env sigma cty in
@@ -970,7 +971,7 @@ let unfold_match env sigma sk app =
   | App (f', args) when Constant.equal (fst (destConst sigma f')) sk ->
       let v = Environ.constant_value_in (Global.env ()) (sk,Univ.Instance.empty)(*FIXME*) in
       let v = EConstr.of_constr v in
-        Reductionops.whd_beta sigma (mkApp (v, args))
+        Reductionops.whd_beta env sigma (mkApp (v, args))
   | _ -> app
 
 let is_rew_cast = function RewCast _ -> true | _ -> false
@@ -1559,13 +1560,14 @@ let assert_replacing id newt tac =
         if Id.equal n id then ev' else mkVar n
       in
       let (e, _) = destEvar sigma ev in
-      (sigma, mkEvar (e, Array.map_of_list map nc))
+      (sigma, mkEvar (e, List.map map nc))
     end
   end in
   Proofview.tclTHEN prf (Proofview.tclFOCUS 2 2 tac)
 
 let newfail n s =
-  Proofview.tclZERO (Refiner.FailError (n, lazy s))
+  let info = Exninfo.reify () in
+  Proofview.tclZERO ~info (Refiner.FailError (n, lazy s))
 
 let cl_rewrite_clause_newtac ?abs ?origsigma ~progress strat clause =
   let open Proofview.Notations in
@@ -1575,8 +1577,10 @@ let cl_rewrite_clause_newtac ?abs ?origsigma ~progress strat clause =
   let treat sigma res =
     match res with
     | None -> newfail 0 (str "Nothing to rewrite")
-    | Some None -> if progress then newfail 0 (str"Failed to progress")
-                   else Proofview.tclUNIT ()
+    | Some None ->
+      if progress
+      then newfail 0 (str"Failed to progress")
+      else Proofview.tclUNIT ()
     | Some (Some res) ->
         let (undef, prf, newt) = res in
         let fold ev _ accu = if Evd.mem sigma ev then accu else ev :: accu in
@@ -1640,7 +1644,9 @@ let cl_rewrite_clause_newtac ?abs ?origsigma ~progress strat clause =
 
 let tactic_init_setoid () =
   try init_setoid (); Proofview.tclUNIT ()
-  with e when CErrors.noncritical e -> Tacticals.New.tclFAIL 0 (str"Setoid library not loaded")
+  with e when CErrors.noncritical e ->
+    let _, info = Exninfo.capture e in
+    Tacticals.New.tclFAIL ~info 0 (str"Setoid library not loaded")
 
 let cl_rewrite_clause_strat progress strat clause =
   tactic_init_setoid () <*>
@@ -1649,10 +1655,11 @@ let cl_rewrite_clause_strat progress strat clause =
       (cl_rewrite_clause_newtac ~progress strat clause)
       (fun (e, info) -> match e with
        | RewriteFailure e ->
-         tclZEROMSG (str"setoid rewrite failed: " ++ e)
+         tclZEROMSG ~info (str"setoid rewrite failed: " ++ e)
        | Refiner.FailError (n, pp) ->
-          tclFAIL n (str"setoid rewrite failed: " ++ Lazy.force pp)
-       | e -> Proofview.tclZERO ~info e))
+         tclFAIL ~info n (str"setoid rewrite failed: " ++ Lazy.force pp)
+       | e ->
+         Proofview.tclZERO ~info e))
 
 (** Setoid rewriting when called with "setoid_rewrite" *)
 let cl_rewrite_clause l left2right occs clause =
@@ -1893,10 +1900,10 @@ let declare_projection name instance_id r =
     in it_mkProd_or_LetIn ccl ctx
   in
   let types = Some (it_mkProd_or_LetIn typ ctx) in
-  let kind, opaque, scope = Decls.(IsDefinition Definition), false, DeclareDef.Global Declare.ImportDefaultBehavior in
+  let kind, opaque, scope = Decls.(IsDefinition Definition), false, Declare.Global Declare.ImportDefaultBehavior in
   let impargs, udecl = [], UState.default_univ_decl in
   let _r : GlobRef.t =
-    DeclareDef.declare_definition ~name ~scope ~kind ~opaque ~impargs ~udecl ~poly ~types ~body sigma
+    Declare.declare_definition ~name ~scope ~kind ~opaque ~impargs ~udecl ~poly ~types ~body sigma
   in ()
 
 let build_morphism_signature env sigma m =
@@ -1960,10 +1967,10 @@ let add_morphism_as_parameter atts m n : unit =
   let env = Global.env () in
   let evd = Evd.from_env env in
   let poly = atts.polymorphic in
-  let kind, opaque, scope = Decls.(IsAssumption Logical), false, DeclareDef.Global Declare.ImportDefaultBehavior in
+  let kind, opaque, scope = Decls.(IsAssumption Logical), false, Declare.Global Declare.ImportDefaultBehavior in
   let impargs, udecl = [], UState.default_univ_decl in
   let evd, types = build_morphism_signature env evd m in
-  let evd, pe = DeclareDef.prepare_parameter ~poly ~udecl ~types evd in
+  let evd, pe = Declare.prepare_parameter ~poly ~udecl ~types evd in
   let cst = Declare.declare_constant ~name:instance_id ~kind (Declare.ParameterEntry pe) in
   let cst = GlobRef.ConstRef cst in
   Classes.add_instance
@@ -1980,7 +1987,7 @@ let add_morphism_interactive atts m n : Lemmas.t =
   let poly = atts.polymorphic in
   let kind = Decls.(IsDefinition Instance) in
   let tac = make_tactic "Coq.Classes.SetoidTactics.add_morphism_tactic" in
-  let hook { DeclareDef.Hook.S.dref; _ } = dref |> function
+  let hook { Declare.Hook.S.dref; _ } = dref |> function
     | GlobRef.ConstRef cst ->
       Classes.add_instance (Classes.mk_instance
                       (PropGlobal.proper_class env evd) Hints.empty_hint_info
@@ -1988,7 +1995,7 @@ let add_morphism_interactive atts m n : Lemmas.t =
       declare_projection n instance_id (GlobRef.ConstRef cst)
     | _ -> assert false
   in
-  let hook = DeclareDef.Hook.make hook in
+  let hook = Declare.Hook.make hook in
   let info = Lemmas.Info.make ~hook ~kind () in
   Flags.silently
     (fun () ->
@@ -2108,7 +2115,7 @@ let general_s_rewrite cl l2r occs (c,l) ~new_goals =
             (cl_rewrite_clause_newtac ~progress:true ~abs:(Some abs) ~origsigma strat cl)))
     (fun (e, info) -> match e with
     | RewriteFailure e ->
-      tclFAIL 0 (str"setoid rewrite failed: " ++ e)
+      tclFAIL ~info 0 (str"setoid rewrite failed: " ++ e)
     | e -> Proofview.tclZERO ~info e)
   end
 
@@ -2116,8 +2123,8 @@ let _ = Hook.set Equality.general_setoid_rewrite_clause general_s_rewrite
 
 (** [setoid_]{reflexivity,symmetry,transitivity} tactics *)
 
-let not_declared env sigma ty rel =
-  tclFAIL 0
+let not_declared ~info env sigma ty rel =
+  tclFAIL ~info 0
     (str" The relation " ++ Printer.pr_econstr_env env sigma rel ++ str" is not a declared " ++
      str ty ++ str" relation. Maybe you need to require the Coq.Classes.RelationClasses library")
 
@@ -2134,7 +2141,10 @@ let setoid_proof ty fn fallback =
           let car = snd (List.hd (fst (Reductionops.splay_prod env sigma t))) in
             (try init_relation_classes () with _ -> raise Not_found);
             fn env sigma car rel
-        with e -> Proofview.tclZERO e
+        with e ->
+          (* XXX what is the right test here as to whether e can be converted ? *)
+          let e, info = Exninfo.capture e in
+          Proofview.tclZERO ~info e
       end
       begin function
         | e ->
@@ -2144,9 +2154,10 @@ let setoid_proof ty fn fallback =
                 | Hipattern.NoEquationFound ->
                     begin match e with
                     | (Not_found, _) ->
-                        let rel, _, _ = decompose_app_rel env sigma concl in
-                        not_declared env sigma ty rel
-                    | (e, info) -> Proofview.tclZERO ~info e
+                      let rel, _, _ = decompose_app_rel env sigma concl in
+                      not_declared ~info env sigma ty rel
+                    | (e, info) ->
+                      Proofview.tclZERO ~info e
                     end
                 | e' -> Proofview.tclZERO ~info e'
               end

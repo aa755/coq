@@ -1,3 +1,5 @@
+.. index:: coqdoc
+
 .. _coqdoc:
 
 Documenting |Coq| files with coqdoc
@@ -220,8 +222,10 @@ Identifiers from the |Coq| standard library are linked to the Coq website
 using command line options ``--no-externals`` and ``--coqlib``; see below.
 
 
-Hiding / Showing parts of the source.
-+++++++++++++++++++++++++++++++++++++
+.. _coqdoc-hide-show:
+
+Hiding / Showing parts of the source
+++++++++++++++++++++++++++++++++++++
 
 Some parts of the source can be hidden using command line options ``-g``
 and ``-l`` (see below), or using such comments:

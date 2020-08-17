@@ -16,16 +16,16 @@ open Vernacexpr
 (** Entry points for the vernacular commands Fixpoint and CoFixpoint *)
 
 val do_fixpoint_interactive :
-  scope:DeclareDef.locality -> poly:bool -> fixpoint_expr list -> Lemmas.t
+  scope:Declare.locality -> poly:bool -> fixpoint_expr list -> Lemmas.t
 
 val do_fixpoint :
-  scope:DeclareDef.locality -> poly:bool -> fixpoint_expr list -> unit
+  scope:Declare.locality -> poly:bool -> fixpoint_expr list -> unit
 
 val do_cofixpoint_interactive :
-  scope:DeclareDef.locality -> poly:bool -> cofixpoint_expr list -> Lemmas.t
+  scope:Declare.locality -> poly:bool -> cofixpoint_expr list -> Lemmas.t
 
 val do_cofixpoint :
-  scope:DeclareDef.locality -> poly:bool -> cofixpoint_expr list -> unit
+  scope:Declare.locality -> poly:bool -> cofixpoint_expr list -> unit
 
 (************************************************************************)
 (** Internal API  *)
@@ -58,7 +58,8 @@ val interp_recursive :
 (** Exported for Funind *)
 
 val interp_fixpoint
-  :  cofix:bool
+  :  ?check_recursivity:bool ->
+     cofix:bool
   -> lident option fix_expr_gen list
   -> (Constr.t, Constr.types) recursive_preentry *
      UState.universe_decl * UState.t *

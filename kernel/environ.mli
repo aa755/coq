@@ -62,7 +62,7 @@ end
 type stratification = {
   env_universes : UGraph.t;
   env_sprop_allowed : bool;
-  env_universes_lbound : Univ.Level.t;
+  env_universes_lbound : UGraph.Bound.t;
   env_engagement : engagement
 }
 
@@ -96,11 +96,13 @@ val eq_named_context_val : named_context_val -> named_context_val -> bool
 val empty_env : env
 
 val universes     : env -> UGraph.t
-val universes_lbound : env -> Univ.Level.t
-val set_universes_lbound : env -> Univ.Level.t -> env
+val universes_lbound : env -> UGraph.Bound.t
+val set_universes_lbound : env -> UGraph.Bound.t -> env
 val rel_context   : env -> Constr.rel_context
 val named_context : env -> Constr.named_context
 val named_context_val : env -> named_context_val
+
+val set_universes : UGraph.t -> env -> env
 
 val opaque_tables : env -> Opaqueproof.opaquetab
 val set_opaque_tables : env -> Opaqueproof.opaquetab -> env
@@ -310,7 +312,7 @@ val push_subgraph : Univ.ContextSet.t -> env -> env
 
 val set_engagement : engagement -> env -> env
 val set_typing_flags : typing_flags -> env -> env
-val make_sprop_cumulative : env -> env
+val set_cumulative_sprop : bool -> env -> env
 val set_allow_sprop : bool -> env -> env
 val sprop_allowed : env -> bool
 

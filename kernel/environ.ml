@@ -67,7 +67,7 @@ end
 type stratification = {
   env_universes : UGraph.t;
   env_sprop_allowed : bool;
-  env_universes_lbound : Univ.Level.t;
+  env_universes_lbound : UGraph.Bound.t;
   env_engagement : engagement
 }
 
@@ -129,7 +129,7 @@ let empty_env = {
   env_stratification = {
     env_universes = UGraph.initial_universes;
     env_sprop_allowed = true;
-    env_universes_lbound = Univ.Level.set;
+    env_universes_lbound = UGraph.Bound.Set;
     env_engagement = PredicativeSet };
   env_typing_flags = Declareops.safe_flags Conv_oracle.empty;
   retroknowledge = Retroknowledge.empty;
@@ -278,6 +278,9 @@ let indices_matter env = env.env_typing_flags.indices_matter
 
 let universes env = env.env_stratification.env_universes
 let universes_lbound env = env.env_stratification.env_universes_lbound
+
+let set_universes g env =
+  {env with env_stratification = {env.env_stratification with env_universes=g}}
 
 let set_universes_lbound env lbound =
   let env_stratification = { env.env_stratification with env_universes_lbound = lbound } in
@@ -431,7 +434,7 @@ let push_subgraph (levels,csts) env =
   in
   map_universes add_subgraph env
 
-let set_engagement c env = (* Unsafe *)
+let set_engagement c env =
   { env with env_stratification =
     { env.env_stratification with env_engagement = c } }
 
@@ -445,6 +448,7 @@ let same_flags {
      share_reduction;
      enable_VM;
      enable_native_compiler;
+     cumulative_sprop;
   } alt =
   check_guarded == alt.check_guarded &&
   check_positive == alt.check_positive &&
@@ -453,14 +457,18 @@ let same_flags {
   indices_matter == alt.indices_matter &&
   share_reduction == alt.share_reduction &&
   enable_VM == alt.enable_VM &&
-  enable_native_compiler == alt.enable_native_compiler
+  enable_native_compiler == alt.enable_native_compiler &&
+  cumulative_sprop == alt.cumulative_sprop
 [@warning "+9"]
 
-let set_typing_flags c env = (* Unsafe *)
-  if same_flags env.env_typing_flags c then env
-  else { env with env_typing_flags = c }
+let set_cumulative_sprop b = map_universes (UGraph.set_cumulative_sprop b)
 
-let make_sprop_cumulative = map_universes UGraph.make_sprop_cumulative
+let set_typing_flags c env =
+  if same_flags env.env_typing_flags c then env
+  else set_cumulative_sprop c.cumulative_sprop { env with env_typing_flags = c }
+
+let set_cumulative_sprop b env =
+  set_typing_flags {env.env_typing_flags with cumulative_sprop=b} env
 
 let set_allow_sprop b env =
   { env with env_stratification =

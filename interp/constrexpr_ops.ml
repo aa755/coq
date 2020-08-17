@@ -15,8 +15,8 @@ open Nameops
 open Libnames
 open Namegen
 open Glob_term
-open Constrexpr
 open Notation
+open Constrexpr
 
 (***********************)
 (* For binders parsing *)
@@ -618,8 +618,9 @@ let interp_univ_constraints env evd cstrs =
     let cstrs' = Univ.Constraint.add cstr cstrs in
     try let evd = Evd.add_constraints evd (Univ.Constraint.singleton cstr) in
         evd, cstrs'
-    with Univ.UniverseInconsistency e ->
-      CErrors.user_err ~hdr:"interp_constraint"
+    with Univ.UniverseInconsistency e as exn ->
+      let _, info = Exninfo.capture exn in
+      CErrors.user_err ~hdr:"interp_constraint" ~info
         (Univ.explain_universe_inconsistency (Termops.pr_evd_level evd) e)
   in
   List.fold_left interp (evd,Univ.Constraint.empty) cstrs

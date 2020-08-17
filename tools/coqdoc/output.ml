@@ -337,11 +337,8 @@ module Latex = struct
     let id = if fid <> "" then (m ^ "." ^ fid) else m in
     match find_module m with
       | Local ->
-          if typ = Variable then
-            printf "\\coqdoc%s{%s}" (type_name typ) s
-          else
-            (printf "\\coqref{"; label_ident id;
-             printf "}{\\coqdoc%s{%s}}" (type_name typ) s)
+          printf "\\coqref{"; label_ident id;
+          printf "}{\\coqdoc%s{%s}}" (type_name typ) s
       | External m when !externals ->
           printf "\\coqexternalref{"; label_ident fid;
           printf "}{%s}{\\coqdoc%s{%s}}" (escaped m) (type_name typ) s
@@ -615,6 +612,7 @@ module Html = struct
       else match s.[i] with
       | 'a'..'z' | 'A'..'Z' | '0'..'9' | '.' | '_' -> loop esc (i-1)
       | '<' | '>' | '&' | '\'' | '\"' -> loop true (i-1)
+      | '-' | ':' -> loop esc (i-1) (* should be safe in HTML5 attribute name syntax *)
       | _ ->
         (* This name contains complex characters:
            this is probably a notation string, we simply hash it. *)
@@ -661,7 +659,8 @@ module Html = struct
   let reference s r =
     match r with
     | Def (fullid,ty) ->
-        printf "<a name=\"%s\">" (sanitize_name fullid);
+        let s' = sanitize_name fullid in
+        printf "<a id=\"%s\" class=\"idref\" href=\"#%s\">" s' s';
         printf "<span class=\"id\" title=\"%s\">%s</span></a>" (type_name ty) s
     | Ref (m,fullid,ty) ->
         ident_ref m fullid (type_name ty) s
@@ -822,7 +821,7 @@ module Html = struct
      | Some n -> if lev <= n then add_toc_entry (Toc_section (lev, f, r))
                    else ());
     stop_item ();
-    printf "<a name=\"%s\"></a><h%d class=\"section\">" lab lev;
+    printf "<a id=\"%s\"></a><h%d class=\"section\">" lab lev;
     f ();
     printf "</h%d>\n" lev
 
@@ -836,10 +835,10 @@ module Html = struct
   let letter_index category idx (c,l) =
     if l <> [] then begin
       let cat = if category && idx <> "global" then "(" ^ idx ^ ")" else "" in
-      printf "<a name=\"%s_%c\"></a><h2>%s %s</h2>\n" idx c (display_letter c) cat;
+      printf "<a id=\"%s_%c\"></a><h2>%s %s</h2>\n" idx c (display_letter c) cat;
       List.iter
         (fun (id,(text,link,t)) ->
-           let id' = prepare_entry id t in
+           let id' = escaped (prepare_entry id t) in
            printf "<a href=\"%s\">%s</a> %s<br/>\n" link id' text) l;
       printf "<br/><br/>"
     end

@@ -95,8 +95,14 @@ let show_proof ~pstate =
   try
     let pstate = Option.get pstate in
     let p = Declare.Proof.get_proof pstate in
-    let sigma, env = Declare.get_current_context pstate in
+    let sigma, _ = Declare.get_current_context pstate in
     let pprf = Proof.partial_proof p in
+    (* In the absence of an environment explicitly attached to the
+       proof and on top of which side effects of the proof would be pushed, ,
+       we take the global environment which in practise should be a
+       superset of the initial environment in which the proof was
+       started *)
+    let env = Global.env() in
     Pp.prlist_with_sep Pp.fnl (Printer.pr_econstr_env env sigma) pprf
   (* We print nothing if there are no goals left *)
   with
@@ -460,7 +466,7 @@ let vernac_custom_entry ~module_local s =
 let check_name_freshness locality {CAst.loc;v=id} : unit =
   (* We check existence here: it's a bit late at Qed time *)
   if Nametab.exists_cci (Lib.make_path id) || Termops.is_section_variable id ||
-     locality <> DeclareDef.Discharge && Nametab.exists_cci (Lib.make_path_except_section id)
+     locality <> Declare.Discharge && Nametab.exists_cci (Lib.make_path_except_section id)
   then
     user_err ?loc  (Id.print id ++ str " already exists.")
 
@@ -475,7 +481,7 @@ let program_inference_hook env sigma ev =
             Evarutil.is_ground_term sigma concl)
     then None
     else
-      let c, _, _, ctx =
+      let c, _, _, _, ctx =
         Declare.build_by_tactic ~poly:false env ~uctx:(Evd.evar_universe_context sigma) ~typ:concl tac
       in
       Some (Evd.set_universe_context sigma ctx, EConstr.of_constr c)
@@ -504,7 +510,7 @@ let start_lemma_com ~program_mode ~poly ~scope ~kind ?hook thms =
   let recguard,thms,snl = RecLemmas.look_for_possibly_mutual_statements evd thms in
   let evd = Evd.minimize_universes evd in
   let thms = List.map (fun (name, (typ, (args, impargs))) ->
-      { DeclareDef.Recthm.name; typ = EConstr.to_constr evd typ; args; impargs} ) thms in
+      { Declare.Recthm.name; typ = EConstr.to_constr evd typ; args; impargs} ) thms in
   let () =
     let open UState in
     if not (udecl.univdecl_extensible_instance && udecl.univdecl_extensible_constraints) then
@@ -521,13 +527,13 @@ let vernac_definition_hook ~canonical_instance ~local ~poly = let open Decls in 
 | Coercion ->
   Some (ComCoercion.add_coercion_hook ~poly)
 | CanonicalStructure ->
-  Some (DeclareDef.Hook.(make (fun { S.dref } -> Canonical.declare_canonical_structure ?local dref)))
+  Some (Declare.Hook.(make (fun { S.dref } -> Canonical.declare_canonical_structure ?local dref)))
 | SubClass ->
   Some (ComCoercion.add_subclass_hook ~poly)
 | Definition when canonical_instance ->
-  Some (DeclareDef.Hook.(make (fun { S.dref } -> Canonical.declare_canonical_structure ?local dref)))
+  Some (Declare.Hook.(make (fun { S.dref } -> Canonical.declare_canonical_structure ?local dref)))
 | Let when canonical_instance ->
-  Some (DeclareDef.Hook.(make (fun { S.dref } -> Canonical.declare_canonical_structure dref)))
+  Some (Declare.Hook.(make (fun { S.dref } -> Canonical.declare_canonical_structure dref)))
 | _ -> None
 
 let default_thm_id = Id.of_string "Unnamed_thm"
@@ -542,7 +548,7 @@ let vernac_definition_name lid local =
          CAst.make ?loc (fresh_name_for_anonymous_theorem ())
     | { v = Name.Name n; loc } -> CAst.make ?loc n in
   let () =
-    let open DeclareDef in
+    let open Declare in
     match local with
     | Discharge -> Dumpglob.dump_definition lid true "var"
     | Global _ -> Dumpglob.dump_definition lid false "def"
@@ -603,8 +609,8 @@ let vernac_assumption ~atts discharge kind l nl =
     if Dumpglob.dump () then
       List.iter (fun (lid, _) ->
           match scope with
-            | DeclareDef.Global _ -> Dumpglob.dump_definition lid false "ax"
-            | DeclareDef.Discharge -> Dumpglob.dump_definition lid true "var") idl) l;
+            | Declare.Global _ -> Dumpglob.dump_definition lid false "ax"
+            | Declare.Discharge -> Dumpglob.dump_definition lid true "var") idl) l;
   ComAssumption.do_assumptions ~poly:atts.polymorphic ~program_mode:atts.program ~scope ~kind nl l
 
 let is_polymorphic_inductive_cumulativity =
@@ -1060,10 +1066,9 @@ let vernac_end_segment ({v=id} as lid) =
 (* Libraries *)
 
 let warn_require_in_section =
-  let name = "require-in-section" in
-  let category = "deprecated" in
-  CWarnings.create ~name ~category
-    (fun () -> strbrk "Use of “Require” inside a section is deprecated.")
+  CWarnings.create ~name:"require-in-section" ~category:"fragile"
+    (fun () -> strbrk "Use of “Require” inside a section is fragile." ++ spc() ++
+               strbrk "It is not recommended to use this functionality in finished proof scripts.")
 
 let vernac_require from import qidl =
   if Global.sections_are_opened () then warn_require_in_section ();
@@ -1275,7 +1280,7 @@ let vernac_hints ~atts dbnames h =
       "This command does not support the export attribute in sections.");
   | OptDefault | OptLocal -> ()
   in
-  Hints.add_hints ~locality dbnames (Hints.interp_hints ~poly h)
+  Hints.add_hints ~locality dbnames (ComHints.interp_hints ~poly h)
 
 let vernac_syntactic_definition ~atts lid x only_parsing =
   let module_local, deprecation = Attributes.(parse Notations.(module_locality ++ deprecation) atts) in
@@ -1302,6 +1307,7 @@ let vernac_generalizable ~local =
   Implicit_quantifiers.declare_generalizable ~local
 
 let allow_sprop_opt_name = ["Allow";"StrictProp"]
+let cumul_sprop_opt_name = ["Cumulative";"StrictProp"]
 
 let () =
   declare_bool_option
@@ -1309,6 +1315,13 @@ let () =
       optkey   = allow_sprop_opt_name;
       optread  = (fun () -> Global.sprop_allowed());
       optwrite = Global.set_allow_sprop }
+
+let () =
+  declare_bool_option
+    { optdepr  = false;
+      optkey   = cumul_sprop_opt_name;
+      optread  = Global.is_cumulative_sprop;
+      optwrite = Global.set_cumulative_sprop }
 
 let () =
   declare_bool_option
@@ -1487,21 +1500,21 @@ let () =
       optread  = CWarnings.get_flags;
       optwrite = CWarnings.set_flags }
 
-let _ =
+let () =
   declare_bool_option
     { optdepr  = false;
       optkey   = ["Guard"; "Checking"];
       optread  = (fun () -> (Global.typing_flags ()).Declarations.check_guarded);
       optwrite = (fun b -> Global.set_check_guarded b) }
 
-let _ =
+let () =
   declare_bool_option
     { optdepr  = false;
       optkey   = ["Positivity"; "Checking"];
       optread  = (fun () -> (Global.typing_flags ()).Declarations.check_positive);
       optwrite = (fun b -> Global.set_check_positive b) }
 
-let _ =
+let () =
   declare_bool_option
     { optdepr  = false;
       optkey   = ["Universe"; "Checking"];
@@ -1554,26 +1567,11 @@ let vernac_set_option ~locality table v = match v with
       vernac_set_option0 ~locality table v
 | _ -> vernac_set_option0 ~locality table v
 
-let vernac_add_option key lv =
-  let f = function
-    | StringRefValue s -> (get_string_table key).add (Global.env()) s
-    | QualidRefValue locqid -> (get_ref_table key).add (Global.env()) locqid
-  in
-  try List.iter f lv with Not_found -> error_undeclared_key key
+let vernac_add_option = iter_table { aux = fun table -> table.add }
 
-let vernac_remove_option key lv =
-  let f = function
-  | StringRefValue s -> (get_string_table key).remove (Global.env()) s
-  | QualidRefValue locqid -> (get_ref_table key).remove (Global.env()) locqid
-  in
-  try List.iter f lv with Not_found -> error_undeclared_key key
+let vernac_remove_option = iter_table { aux = fun table -> table.remove }
 
-let vernac_mem_option key lv =
-  let f = function
-  | StringRefValue s -> (get_string_table key).mem (Global.env()) s
-  | QualidRefValue locqid -> (get_ref_table key).mem (Global.env()) locqid
-  in
-  try List.iter f lv with Not_found -> error_undeclared_key key
+let vernac_mem_option = iter_table { aux = fun table -> table.mem }
 
 let vernac_print_option key =
   try (get_ref_table key).print ()
@@ -1734,7 +1732,8 @@ let vernac_print ~pstate ~atts =
   | PrintHintGoal ->
      begin match pstate with
      | Some pstate ->
-       Hints.pr_applicable_hint pstate
+       let pf = Declare.Proof.get_proof pstate in
+       Hints.pr_applicable_hint pf
      | None ->
        str "No proof in progress"
      end
@@ -1762,91 +1761,17 @@ let vernac_print ~pstate ~atts =
   | PrintStrategy r -> print_strategy r
   | PrintRegistered -> print_registered ()
 
-let global_module qid =
-  try Nametab.full_name_module qid
-  with Not_found ->
-    user_err ?loc:qid.CAst.loc ~hdr:"global_module"
-     (str "Module/section " ++ pr_qualid qid ++ str " not found.")
-
-let interp_search_restriction = function
-  | SearchOutside l -> (List.map global_module l, true)
-  | SearchInside l -> (List.map global_module l, false)
-
-open Search
-
-let interp_search_about_item env sigma =
-  function
-  | SearchSubPattern pat ->
-      let _,pat = Constrintern.intern_constr_pattern env sigma pat in
-      GlobSearchSubPattern pat
-  | SearchString (s,None) when Id.is_valid s ->
-      GlobSearchString s
-  | SearchString (s,sc) ->
-      try
-        let ref =
-          Notation.interp_notation_as_global_reference
-            (fun _ -> true) s sc in
-        GlobSearchSubPattern (Pattern.PRef ref)
-      with UserError _ ->
-        user_err ~hdr:"interp_search_about_item"
-          (str "Unable to interp \"" ++ str s ++ str "\" either as a reference or as an identifier component")
-
-(* 05f22a5d6d5b8e3e80f1a37321708ce401834430 introduced the
-   `search_output_name_only` option to avoid excessive printing when
-   searching.
-
-   The motivation was to make search usable for IDE completion,
-   however, it is still too slow due to the non-indexed nature of the
-   underlying search mechanism.
-
-   In the future we should deprecate the option and provide a fast,
-   indexed name-searching interface.
-*)
-let search_output_name_only = ref false
-
-let () =
-  declare_bool_option
-    { optdepr  = false;
-      optkey   = ["Search";"Output";"Name";"Only"];
-      optread  = (fun () -> !search_output_name_only);
-      optwrite = (:=) search_output_name_only }
-
 let vernac_search ~pstate ~atts s gopt r =
+  let open ComSearch in
   let gopt = query_command_selector gopt in
-  let r = interp_search_restriction r in
-  let env,gopt =
+  let sigma, env =
     match gopt with | None ->
       (* 1st goal by default if it exists, otherwise no goal at all *)
-      (try snd (get_goal_or_global_context ~pstate 1) , Some 1
-       with _ -> Global.env (),None)
+      (try get_goal_or_global_context ~pstate 1
+       with _ -> let env = Global.env () in (Evd.from_env env, env))
     (* if goal selector is given and wrong, then let exceptions be raised. *)
-    | Some g -> snd (get_goal_or_global_context ~pstate g) , Some g
-  in
-  let get_pattern c = snd (Constrintern.intern_constr_pattern env Evd.(from_env env) c) in
-  let pr_search ref env c =
-    let pr = pr_global ref in
-    let pp = if !search_output_name_only
-      then pr
-      else begin
-        let open Impargs in
-        let impargs = select_stronger_impargs (implicits_of_global ref) in
-        let impargs = List.map binding_kind_of_status impargs in
-        let pc = pr_ltype_env env Evd.(from_env env) ~impargs c in
-        hov 2 (pr ++ str":" ++ spc () ++ pc)
-      end
-    in Feedback.msg_notice pp
-  in
-  (match s with
-  | SearchPattern c ->
-      (Search.search_pattern ?pstate gopt (get_pattern c) r |> Search.prioritize_search) pr_search
-  | SearchRewrite c ->
-      (Search.search_rewrite ?pstate gopt (get_pattern c) r |> Search.prioritize_search) pr_search
-  | SearchHead c ->
-      (Search.search_by_head ?pstate gopt (get_pattern c) r |> Search.prioritize_search) pr_search
-  | Search sl ->
-      (Search.search ?pstate gopt (List.map (on_snd (interp_search_about_item env Evd.(from_env env))) sl) r |>
-       Search.prioritize_search) pr_search);
-  Feedback.msg_notice (str "(use \"About\" for full details on implicit arguments)")
+    | Some g -> get_goal_or_global_context ~pstate g in
+  interp_search env sigma s r
 
 let vernac_locate ~pstate = let open Constrexpr in function
   | LocateAny {v=AN qid}  -> Prettyp.print_located_qualid qid

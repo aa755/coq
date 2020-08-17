@@ -19,13 +19,13 @@ open Libnames
 open Namegen
 open Impargs
 open CAst
+open Notation
 open Constrexpr
 open Constrexpr_ops
 open Notation_ops
 open Glob_term
 open Glob_ops
 open Pattern
-open Notation
 open Detyping
 
 module NamedDecl = Context.Named.Declaration
@@ -282,9 +282,9 @@ let insert_pat_alias ?loc p = function
   | Anonymous -> p
   | Name _ as na -> CAst.make ?loc @@ CPatAlias (p,(CAst.make ?loc na))
 
-let rec insert_coercion ?loc l c = match l with
+let rec insert_entry_coercion ?loc l c = match l with
   | [] -> c
-  | (inscope,ntn)::l -> CAst.make ?loc @@ CNotation (Some inscope,ntn,([insert_coercion ?loc l c],[],[],[]))
+  | (inscope,ntn)::l -> CAst.make ?loc @@ CNotation (Some inscope,ntn,([insert_entry_coercion ?loc l c],[],[],[]))
 
 let rec insert_pat_coercion ?loc l c = match l with
   | [] -> c
@@ -359,14 +359,14 @@ let make_notation_gen loc ntn mknot mkprim destprim l bl =
     (* Special case to avoid writing "- 3" for e.g. (Z.opp 3) *)
     | "- _", [Some (Numeral p)] when not (NumTok.Signed.is_zero p) ->
         assert (bl=[]);
-        mknot (loc,ntn,([mknot (loc,(InConstrEntrySomeLevel,"( _ )"),l,[])]),[])
+        mknot (loc,ntn,([mknot (loc,(InConstrEntry,"( _ )"),l,[])]),[])
     | _ ->
         match decompose_notation_key ntn, l with
-        | (InConstrEntrySomeLevel,[Terminal "-"; Terminal x]), [] ->
+        | (InConstrEntry,[Terminal "-"; Terminal x]), [] ->
            begin match NumTok.Unsigned.parse_string x with
            | Some n -> mkprim (loc, Numeral (NumTok.SMinus,n))
            | None -> mknot (loc,ntn,l,bl) end
-        | (InConstrEntrySomeLevel,[Terminal x]), [] ->
+        | (InConstrEntry,[Terminal x]), [] ->
            begin match NumTok.Unsigned.parse_string x with
            | Some n -> mkprim (loc, Numeral (NumTok.SPlus,n))
            | None -> mknot (loc,ntn,l,bl) end
@@ -435,13 +435,10 @@ let extern_record_pattern cstrsp args =
 let rec extern_cases_pattern_in_scope (custom,scopes as allscopes) vars pat =
   try
     if !Flags.in_debugger || !Flags.raw_print || !print_no_symbol then raise No_match;
-    let (na,sc,p) = uninterp_prim_token_cases_pattern pat in
+    let (na,p,key) = uninterp_prim_token_cases_pattern pat scopes in
     match availability_of_entry_coercion custom InConstrEntrySomeLevel with
       | None -> raise No_match
       | Some coercion ->
-    match availability_of_prim_token p sc scopes with
-      | None -> raise No_match
-      | Some key ->
         let loc = cases_pattern_loc pat in
         insert_pat_coercion ?loc coercion
           (insert_pat_alias ?loc (insert_pat_delimiters ?loc (CAst.make ?loc @@ CPatPrim p) key) na)
@@ -453,7 +450,8 @@ let rec extern_cases_pattern_in_scope (custom,scopes as allscopes) vars pat =
     with No_match ->
     let loc = pat.CAst.loc in
     match DAst.get pat with
-    | PatVar (Name id) when entry_has_ident custom -> CAst.make ?loc (CPatAtom (Some (qualid_of_ident ?loc id)))
+    | PatVar (Name id) when entry_has_global custom || entry_has_ident custom ->
+      CAst.make ?loc (CPatAtom (Some (qualid_of_ident ?loc id)))
     | pat ->
     match availability_of_entry_coercion custom InConstrEntrySomeLevel with
     | None -> raise No_match
@@ -488,7 +486,13 @@ and apply_notation_to_pattern ?loc gr ((subst,substlist),(no_implicit,nb_to_drop
   function
     | NotationRule (_,ntn as specific_ntn) ->
       begin
-        match availability_of_entry_coercion custom (fst ntn) with
+        let notation_entry_level = match (fst ntn) with
+          | InConstrEntry -> InConstrEntrySomeLevel
+          | InCustomEntry s ->
+            let (_,level,_) = Notation.level_of_notation ntn in
+            InCustomEntryLevel (s, level)
+        in
+        match availability_of_entry_coercion custom notation_entry_level with
         | None -> raise No_match
         | Some coercion ->
         match availability_of_notation specific_ntn (tmp_scope,scopes) with
@@ -614,6 +618,10 @@ let is_projection nargs r =
   else None
 
 let is_hole = function CHole _ | CEvar _ -> true | _ -> false
+
+let isCRef_no_univ = function
+  | CRef (_,None) -> true
+  | _ -> false
 
 let is_significant_implicit a =
   not (is_hole (a.CAst.v))
@@ -834,7 +842,7 @@ let rec flatten_application c = match DAst.get c with
 
 let same_binder_type ty nal c =
   match nal, DAst.get c with
-  | _::_, GProd (_,_,ty',_) -> glob_constr_eq ty ty'
+  | _::_, (GProd (_,_,ty',_) | GLambda (_,_,ty',_)) -> glob_constr_eq ty ty'
   | [], _ -> true
   | _ -> assert false
 
@@ -843,19 +851,24 @@ let same_binder_type ty nal c =
 (* one with no delimiter if possible)                                 *)
 
 let extern_possible_prim_token (custom,scopes) r =
-   let (sc,n) = uninterp_prim_token r in
+   let (n,key) = uninterp_prim_token r scopes in
    match availability_of_entry_coercion custom InConstrEntrySomeLevel with
    | None -> raise No_match
    | Some coercion ->
-   match availability_of_prim_token n sc scopes with
-   | None -> raise No_match
-   | Some key -> insert_coercion coercion (insert_delimiters (CAst.make ?loc:(loc_of_glob_constr r) @@ CPrim n) key)
+      insert_entry_coercion coercion (insert_delimiters (CAst.make ?loc:(loc_of_glob_constr r) @@ CPrim n) key)
 
 let filter_enough_applied nargs l =
+  (* This is to ensure that notations for coercions are used only when
+     the coercion is fully applied; not explicitly done yet, but we
+     could also expect that the notation is exactly talking about the
+     coercion *)
   match nargs with
   | None -> l
   | Some nargs ->
-  List.filter (fun (keyrule,pat,n as _rule) -> match n with Some n -> n > nargs | None -> false) l
+  List.filter (fun (keyrule,pat,n as _rule) ->
+      match n with
+      | AppBoundedNotation n -> n > nargs
+      | AppUnboundedNotation | NotAppNotation -> false) l
 
 (* Helper function for safe and optimal printing of primitive tokens  *)
 (* such as those for Int63                                            *)
@@ -931,7 +944,8 @@ let rec extern inctx ?impargs scopes vars r =
   match DAst.get r with
   | GRef (ref,us) when entry_has_global (fst scopes) -> CAst.make ?loc (extern_ref vars ref us)
 
-  | GVar id when entry_has_ident (fst scopes) -> CAst.make ?loc (extern_var ?loc id)
+  | GVar id when entry_has_global (fst scopes) || entry_has_ident (fst scopes) ->
+      CAst.make ?loc (extern_var ?loc id)
 
   | c ->
 
@@ -1081,7 +1095,7 @@ let rec extern inctx ?impargs scopes vars r =
 
   | GFloat f -> extern_float f (snd scopes)
 
-  in insert_coercion coercion (CAst.make ?loc c)
+  in insert_entry_coercion coercion (CAst.make ?loc c)
 
 and extern_typ ?impargs (subentry,(_,scopes)) =
   extern true ?impargs (subentry,(Notation.current_type_scope_name (),scopes))
@@ -1230,7 +1244,7 @@ and extern_notation (custom,scopes as allscopes) vars t rules =
             [], [] in
         (* Adjust to the number of arguments expected by the notation *)
         let (t,args,argsscopes,argsimpls) = match n with
-          | Some n when nallargs >= n ->
+          | AppBoundedNotation n when nallargs >= n ->
               let args1, args2 = List.chop n args in
               let args2scopes = try List.skipn n argsscopes with Failure _ -> [] in
               let args2impls =
@@ -1240,19 +1254,26 @@ and extern_notation (custom,scopes as allscopes) vars t rules =
                   []
                 else try List.skipn n argsimpls with Failure _ -> [] in
               DAst.make @@ GApp (f,args1), args2, args2scopes, args2impls
-          | None ->
+          | AppUnboundedNotation -> t, [], [], []
+          | NotAppNotation ->
             begin match DAst.get f with
             | GRef (ref,us) -> f, args, argsscopes, argsimpls
             | _ -> t, [], [], []
             end
-          | _ -> raise No_match in
+          | AppBoundedNotation _ -> raise No_match in
         (* Try matching ... *)
         let terms,termlists,binders,binderlists =
           match_notation_constr !print_universes t pat in
         (* Try availability of interpretation ... *)
         match keyrule with
           | NotationRule (_,ntn as specific_ntn) ->
-             (match availability_of_entry_coercion custom (fst ntn) with
+            let notation_entry_level = match (fst ntn) with
+              | InConstrEntry -> InConstrEntrySomeLevel
+              | InCustomEntry s ->
+                let (_,level,_) = Notation.level_of_notation ntn in
+                InCustomEntryLevel (s, level)
+             in
+             (match availability_of_entry_coercion custom notation_entry_level with
              | None -> raise No_match
              | Some coercion ->
                match availability_of_notation specific_ntn scopes with
@@ -1279,14 +1300,11 @@ and extern_notation (custom,scopes as allscopes) vars t rules =
                       pi3 (extern_local_binder (subentry,(scopt,scl@scopes')) vars bl))
                       binderlists in
                   let c = make_notation loc specific_ntn (l,ll,bl,bll) in
-                  let c = insert_coercion coercion (insert_delimiters c key) in
+                  let c = insert_entry_coercion coercion (insert_delimiters c key) in
                   let args = fill_arg_scopes args argsscopes allscopes in
                   let args = extern_args (extern true) vars args in
                   CAst.make ?loc @@ extern_applied_notation nallargs argsimpls c args)
           | SynDefRule kn ->
-             match availability_of_entry_coercion custom InConstrEntrySomeLevel with
-             | None -> raise No_match
-             | Some coercion ->
               let l =
                 List.map (fun (c,(subentry,(scopt,scl))) ->
                   extern true (subentry,(scopt,scl@snd scopes)) vars c)
@@ -1296,7 +1314,10 @@ and extern_notation (custom,scopes as allscopes) vars t rules =
               let args = fill_arg_scopes args argsscopes allscopes in
               let args = extern_args (extern true) vars args in
               let c = CAst.make ?loc @@ extern_applied_syntactic_definition nallargs argsimpls (a,cf) l args in
-              insert_coercion coercion c
+              if isCRef_no_univ c.CAst.v && entry_has_global custom then c
+             else match availability_of_entry_coercion custom InConstrEntrySomeLevel with
+             | None -> raise No_match
+             | Some coercion -> insert_entry_coercion coercion c
       with
           No_match -> extern_notation allscopes vars t rules
 

@@ -6,6 +6,7 @@ stages:
   - stage-2 # Only dependencies in stage 1
   - stage-3 # Only dependencies in stage 1 and 2
   - stage-4 # Only dependencies in stage 1, 2 and 3
+  - stage-5 # Only dependencies in stage 1, 2, 3, and 4
   - deploy
 
 # When a job has no dependencies, it goes to stage 1.  Otherwise, we
@@ -18,7 +19,7 @@ stages:
 variables:
   # Format: $IMAGE-V$DATE [Cache is not used as of today but kept here
   # for reference]
-  CACHEKEY: "bionic_coq-V2020-03-13-V69"
+  CACHEKEY: "bionic_coq-v8.12-V2020-06-05-V1"
   IMAGE: "$CI_REGISTRY_IMAGE:$CACHEKEY"
   # By default, jobs run in the base switch; override to select another switch
   OPAM_SWITCH: "base"
@@ -212,7 +213,10 @@ before_script:
   dependencies:
     - not-a-real-job
   script:
-    - cd _install_ci
+    # exit 0: workaround for https://gitlab.com/gitlab-org/gitlab/issues/202505
+    # the validate:quick job is sometimes started before build:quick, without artifacts
+    # we ignore these spurious errors so if the job fails it's a real error
+    - cd _install_ci || exit 0
     - find lib/coq/ -name '*.vo' -fprint0 vofiles
     - xargs -0 --arg-file=vofiles bin/coqchk -o -m -coqlib lib/coq/ > ../coqchk.log 2>&1 || touch coqchk.failed
     - tail -n 1000 ../coqchk.log # the log is too big for gitlab so pipe to a file and display the tail
@@ -349,6 +353,9 @@ windows32:
 
 lint:
   stage: stage-1
+  except:
+    variables:
+      - $ONLY_WINDOWS == "true"
   script: dev/lint-repository.sh
   dependencies: []
   variables:
@@ -358,6 +365,9 @@ lint:
 
 pkg:opam:
   stage: stage-1
+  except:
+    variables:
+      - $ONLY_WINDOWS == "true"
   interruptible: true
   # OPAM will build out-of-tree so no point in importing artifacts
   dependencies: []
@@ -375,9 +385,6 @@ pkg:opam:
 
 .nix-template:
   image: nixorg/nix:latest # Minimal NixOS image which doesn't even contain git
-  except:
-    variables:
-      - $ONLY_WINDOWS == "true"
   interruptible: true
   stage: stage-1
   variables:
@@ -417,6 +424,9 @@ pkg:nix:deploy:
   only:
     - master
     - /^v.*\..*$/
+  except:
+    variables:
+      - $ONLY_WINDOWS == "true"
 
 pkg:nix:deploy:channel:
   extends: .deploy-template
@@ -441,8 +451,11 @@ pkg:nix:deploy:channel:
 pkg:nix:
   extends: .nix-template
   except:
-    - master
-    - /^v.*\..*$/
+    refs:
+      - master
+      - /^v.*\..*$/
+    variables:
+      - $ONLY_WINDOWS == "true"
 
 doc:refman:
   extends: .doc-template
@@ -469,6 +482,8 @@ doc:refman-pdf:dune:
       - _build/log
       - _build/default/doc/refman-pdf
 
+# currently bugged: dune cleans up the glob files so no links
+# see #12699
 doc:stdlib:dune:
   extends: .dune-ci-template
   variables:
@@ -489,11 +504,11 @@ doc:refman:deploy:
   dependencies:
     - doc:ml-api:odoc
     - doc:refman:dune
-    - doc:stdlib:dune
+    - build:base
   needs:
     - doc:ml-api:odoc
     - doc:refman:dune
-    - doc:stdlib:dune
+    - build:base
   script:
     - echo "$DOCUMENTATION_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
     - git clone git@github.com:coq/doc.git _deploy
@@ -503,7 +518,7 @@ doc:refman:deploy:
     - mkdir -p _deploy/$CI_COMMIT_REF_NAME
     - cp -rv _build/default/_doc/_html _deploy/$CI_COMMIT_REF_NAME/api
     - cp -rv _build/default/doc/refman-html _deploy/$CI_COMMIT_REF_NAME/refman
-    - cp -rv _build/default/doc/stdlib/html _deploy/$CI_COMMIT_REF_NAME/stdlib
+    - cp -rv _install_ci/share/doc/coq/html/stdlib _deploy/$CI_COMMIT_REF_NAME/stdlib
     - cd _deploy/$CI_COMMIT_REF_NAME/
     - git add api refman stdlib
     - git commit -m "Documentation of branch “$CI_COMMIT_REF_NAME” at $CI_COMMIT_SHORT_SHA"
@@ -548,6 +563,10 @@ test-suite:edge+flambda:
 
 test-suite:edge:dune:dev:
   stage: stage-2
+  except:
+    variables:
+      - $ONLY_WINDOWS == "true"
+  interruptible: true
   dependencies:
     - build:edge+flambda:dune:dev
   needs:
@@ -568,6 +587,10 @@ test-suite:edge:dune:dev:
 
 test-suite:edge+4.11+trunk+dune:
   stage: stage-1
+  except:
+    variables:
+      - $ONLY_WINDOWS == "true"
+  interruptible: true
   dependencies: []
   script:
     - opam switch create 4.11.0 --empty
@@ -673,6 +696,9 @@ library:ci-color:
 library:ci-compcert:
   extends: .ci-template-flambda
 
+library:ci-coq_tools:
+  extends: .ci-template
+
 library:ci-coqprime:
   stage: stage-3
   extends: .ci-template-flambda
@@ -690,18 +716,19 @@ library:ci-coqprime:
 library:ci-coquelicot:
   extends: .ci-template
 
-library:ci-cross-crypto:
+library:ci-cross_crypto:
   extends: .ci-template
 
-library:ci-fcsl-pcm:
+library:ci-fcsl_pcm:
   extends: .ci-template
 
-# We cannot use flambda due to
-# https://github.com/ocaml/ocaml/issues/7842, see
-# https://github.com/coq/coq/pull/11916#issuecomment-609977375
-library:ci-fiat-crypto:
-  extends: .ci-template
+library:ci-fiat_crypto:
+  extends: .ci-template-flambda
   stage: stage-4
+  artifacts:
+    name: "$CI_JOB_NAME"
+    paths:
+      - _build_ci
   needs:
   - build:edge+flambda
   - library:ci-coqprime
@@ -710,10 +737,34 @@ library:ci-fiat-crypto:
   dependencies:
   - build:edge+flambda
   - library:ci-coqprime
+  - plugin:ci-bignums
   - plugin:ci-rewriter
 
-library:ci-flocq:
+# We cannot use flambda due to
+# https://github.com/ocaml/ocaml/issues/7842, see
+# https://github.com/coq/coq/pull/11916#issuecomment-609977375
+library:ci-fiat_crypto_ocaml:
   extends: .ci-template
+  stage: stage-5
+  needs:
+  - build:edge+flambda
+  - library:ci-coqprime
+  - plugin:ci-bignums
+  - plugin:ci-rewriter
+  - library:ci-fiat_crypto
+  dependencies:
+  - build:edge+flambda
+  - library:ci-coqprime
+  - plugin:ci-bignums
+  - plugin:ci-rewriter
+  - library:ci-fiat_crypto
+
+library:ci-flocq:
+  extends: .ci-template-flambda
+  artifacts:
+    name: "$CI_JOB_NAME"
+    paths:
+      - _build_ci
 
 library:ci-corn:
   extends: .ci-template-flambda
@@ -721,10 +772,10 @@ library:ci-corn:
   needs:
   - build:edge+flambda
   - plugin:ci-bignums
-  - library:ci-math-classes
+  - library:ci-math_classes
   dependencies:
   - build:edge+flambda
-  - library:ci-math-classes
+  - library:ci-math_classes
 
 library:ci-geocoq:
   extends: .ci-template-flambda
@@ -732,10 +783,10 @@ library:ci-geocoq:
 library:ci-hott:
   extends: .ci-template
 
-library:ci-iris-lambda-rust:
+library:ci-lambda_rust:
   extends: .ci-template-flambda
 
-library:ci-math-classes:
+library:ci-math_classes:
   extends: .ci-template-flambda
   stage: stage-3
   artifacts:
@@ -749,7 +800,7 @@ library:ci-math-classes:
   - build:edge+flambda
   - plugin:ci-bignums
 
-library:ci-math-comp:
+library:ci-mathcomp:
   extends: .ci-template-flambda
 
 library:ci-sf:
@@ -764,11 +815,18 @@ library:ci-tlc:
 library:ci-unimath:
   extends: .ci-template-flambda
 
-library:ci-verdi-raft:
+library:ci-verdi_raft:
   extends: .ci-template-flambda
 
 library:ci-vst:
   extends: .ci-template-flambda
+  stage: stage-3
+  needs:
+  - build:edge+flambda
+  - library:ci-flocq
+  dependencies:
+  - build:edge+flambda
+  - library:ci-flocq
 
 # Plugins are by definition the projects that depend on Coq's ML API
 
@@ -822,6 +880,10 @@ plugin:ci-perennial:
 
 plugin:plugin-tutorial:
   stage: stage-1
+  except:
+    variables:
+      - $ONLY_WINDOWS == "true"
+  interruptible: true
   dependencies: []
   script:
     - ./configure -local -warn-error yes

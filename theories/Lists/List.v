@@ -517,18 +517,20 @@ Section Elts.
       exists (a::l1); exists l2; simpl; split; now f_equal.
   Qed.
 
-  Lemma nth_ext : forall l l' d, length l = length l' ->
-    (forall n, nth n l d = nth n l' d) -> l = l'.
+  Lemma nth_ext : forall l l' d d', length l = length l' ->
+    (forall n, n < length l -> nth n l d = nth n l' d') -> l = l'.
   Proof.
-    induction l; intros l' d Hlen Hnth; destruct l' as [| b l'].
+    induction l; intros l' d d' Hlen Hnth; destruct l' as [| b l'].
     - reflexivity.
     - inversion Hlen.
     - inversion Hlen.
     - change a with (nth 0 (a :: l) d).
-      change b with (nth 0 (b :: l') d).
+      change b with (nth 0 (b :: l') d').
       rewrite Hnth; f_equal.
-      apply IHl with d; [ now inversion Hlen | ].
-      intros n; apply (Hnth (S n)).
+      + apply IHl with d d'; [ now inversion Hlen | ].
+        intros n Hlen'; apply (Hnth (S n)).
+        now simpl; apply lt_n_S.
+      + simpl; apply Nat.lt_0_succ.
   Qed.
 
   (** Results about [nth_error] *)
@@ -1141,7 +1143,7 @@ Section Map.
   Qed.
 
   Lemma map_eq_cons : forall l l' b,
-    map l = b :: l' -> exists a tl, l = a :: tl /\ b = f a /\ l' = map tl.
+    map l = b :: l' -> exists a tl, l = a :: tl /\ f a = b /\ map tl = l'.
   Proof.
     intros l l' b Heq.
     destruct l; inversion_clear Heq.
@@ -1149,7 +1151,7 @@ Section Map.
   Qed.
 
   Lemma map_eq_app  : forall l l1 l2,
-    map l = l1 ++ l2 -> exists l1' l2', l = l1' ++ l2' /\ l1 = map l1' /\ l2 = map l2'.
+    map l = l1 ++ l2 -> exists l1' l2', l = l1' ++ l2' /\ map l1' = l1 /\ map l2' = l2.
   Proof.
     induction l; simpl; intros l1 l2 Heq.
     - symmetry in Heq; apply app_eq_nil in Heq; destruct Heq; subst.
@@ -2008,6 +2010,9 @@ Section SetIncl.
       now apply incl_cons_inv in Hin.
   Qed.
 
+  Lemma incl_filter f l : incl (filter f l) l.
+  Proof. intros x Hin; now apply filter_In in Hin. Qed.
+
   Lemma remove_incl (eq_dec : forall x y : A, {x = y} + {x <> y}) : forall l1 l2 x,
     incl l1 l2 -> incl (remove eq_dec x l1) (remove eq_dec x l2).
   Proof.
@@ -2018,8 +2023,15 @@ Section SetIncl.
 
 End SetIncl.
 
+Lemma incl_map A B (f : A -> B) l1 l2 : incl l1 l2 -> incl (map f l1) (map f l2).
+Proof.
+  intros Hincl x Hinx.
+  destruct (proj1 (in_map_iff _ _ _) Hinx) as [y [<- Hiny]].
+  apply in_map; intuition.
+Qed.
+
 Hint Resolve incl_refl incl_tl incl_tran incl_appl incl_appr incl_cons
-  incl_app: datatypes.
+  incl_app incl_map: datatypes.
 
 
 (**************************************)
@@ -2412,6 +2424,15 @@ Section ReDun.
     now apply Hnin, in_rev.
   Qed.
 
+  Lemma NoDup_filter f l : NoDup l -> NoDup (filter f l).
+  Proof.
+    induction l; simpl; intros Hnd; auto.
+    apply NoDup_cons_iff in Hnd.
+    destruct (f a); [ | intuition ].
+    apply NoDup_cons_iff; split; intuition.
+    apply filter_In in H; intuition.
+  Qed.
+
   (** Effective computation of a list without duplicates *)
 
   Hypothesis decA: forall x y : A, {x = y} + {x <> y}.
@@ -2557,6 +2578,33 @@ Section ReDun.
      revert x Hx. apply (IH l''); trivial.
      * apply le_S_n. now rewrite <- (Add_length AD).
      * now apply incl_Add_inv with a l'.
+  Qed.
+
+  Lemma NoDup_incl_NoDup (l l' : list A) : NoDup l ->
+    length l' <= length l -> incl l l' -> NoDup l'.
+  Proof.
+    revert l'; induction l; simpl; intros l' Hnd Hlen Hincl.
+    - now destruct l'; inversion Hlen.
+    - assert (In a l') as Ha by now apply Hincl; left.
+      apply in_split in Ha as [l1' [l2' ->]].
+      inversion_clear Hnd as [|? ? Hnin Hnd'].
+      apply (NoDup_Add (Add_app a l1' l2')); split.
+      + apply IHl; auto.
+        * rewrite app_length.
+          rewrite app_length in Hlen; simpl in Hlen; rewrite Nat.add_succ_r in Hlen.
+          now apply Nat.succ_le_mono.
+        * apply incl_Add_inv with (u:= l1' ++ l2') in Hincl; auto.
+          apply Add_app.
+      + intros Hnin'.
+        assert (incl (a :: l) (l1' ++ l2')) as Hincl''.
+        { apply incl_tran with (l1' ++ a :: l2'); auto.
+          intros x Hin.
+          apply in_app_or in Hin as [Hin|[->|Hin]]; intuition. }
+        apply NoDup_incl_length in Hincl''; [ | now constructor ].
+        apply (Nat.nle_succ_diag_l (length l1' + length l2')).
+        rewrite_all app_length.
+        simpl in Hlen; rewrite Nat.add_succ_r in Hlen.
+        now transitivity (S (length l)).
   Qed.
 
 End ReDun.
@@ -2919,6 +2967,10 @@ Section Exists_Forall.
     destruct (Forall_dec P Pdec l); [left|right]; trivial.
     now apply neg_Forall_Exists_neg.
   Defined.
+
+  Lemma incl_Forall_in_iff l l' :
+    incl l l' <-> Forall (fun x => In x l') l.
+  Proof. now rewrite Forall_forall; split. Qed.
 
 End Exists_Forall.
 
