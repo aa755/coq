@@ -162,6 +162,10 @@ let warning_module_notfound f s =
   coqdep_warning "in file %s, library %s is required and has not been found in the loadpath!"
     f (String.concat "." s)
 
+let warning_module_notfoundxx f s =
+  coqdep_warning "in file %s, library %s is required and has not been found in the loadpath!xx"
+    f (String.concat "." s)
+
 let warning_multiple_paths_match f s lppath suffix =
   let logpath = (String.concat "." s) in
   coqdep_warning "in file %s, library %s is required and has not been found in the loadpath! the library's logical path's largest matching prefix (%s) matches multiple physical directories %s"
@@ -296,6 +300,7 @@ let string_of_dependency_list suffix_for_require deps =
     [s] is the unmatched suffix of the logical path. if [p] is empty, then this [s] can be any list.
 *)
 let rec phys_path_best_match (prefix: string list) (logpath: string list) :  (string list * string list) =
+  coqdep_warning "phys_path_best_match (%s, %s)" (String.concat " " prefix) (String.concat " " logpath);
   match logpath with
   | [] -> (find_physpath prefix, [])
   | h::tl -> match phys_path_best_match (prefix@[h]) tl with
@@ -353,7 +358,7 @@ let rec find_dependencies basename =
                   (if !option_compute_missing then
                     (match (phys_path_best_match [] str) with
                     | ([ppath], suffix) -> add_dep (DepRequire (fconcatl (ppath::suffix)))
-                    | ([],_) -> warning_module_notfound f str
+                    | ([],_) -> warning_module_notfoundxx f str
                     | (lppath, suffix) -> warning_multiple_paths_match f str lppath suffix)
                   else warning_module_notfound f str)
               end) strl
