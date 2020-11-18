@@ -659,8 +659,12 @@ let replace_using_leibniz clause c1 c2 l2r unsafe try_prove_eq_opt =
   | None ->
     tclFAIL 0 (str"Terms do not have convertible types")
   | Some evd ->
-    let e = lib_ref "core.eq.type" in
-    let sym = lib_ref "core.eq.sym" in
+    let e,sym =
+      try lib_ref "core.eq.type", lib_ref "core.eq.sym"
+      with UserError _ ->
+      try lib_ref "core.identity.type", lib_ref "core.identity.sym"
+      with UserError _ ->
+        user_err (strbrk "Need a registration for either core.eq.type and core.eq.sym or core.identity.type and core.identity.sym.") in
     Tacticals.New.pf_constr_of_global sym >>= fun sym ->
     Tacticals.New.pf_constr_of_global e >>= fun e ->
     let eq = applist (e, [t1;c1;c2]) in
@@ -1134,6 +1138,7 @@ let make_tuple env sigma (rterm,rty) lind =
   assert (not (noccurn sigma lind rty));
   let sigdata = find_sigma_data env (get_sort_of env sigma rty) in
   let sigma, a = type_of ~refresh:true env sigma (mkRel lind) in
+  let a = simpl env sigma a in
   let na = Context.Rel.Declaration.get_annot (lookup_rel lind env) in
   (* We move [lind] to [1] and lift other rels > [lind] by 1 *)
   let rty = lift (1-lind) (liftn lind (lind+1) rty) in
@@ -1644,7 +1649,7 @@ let cutSubstClause l2r eqn cls =
 
 let warn_deprecated_cutrewrite =
   CWarnings.create ~name:"deprecated-cutrewrite" ~category:"deprecated"
-    (fun () -> strbrk"\"cutrewrite\" is deprecated. See documentation for proposed replacement.")
+    (fun () -> strbrk"\"cutrewrite\" is deprecated. Use \"replace\" instead.")
 
 let cutRewriteClause l2r eqn cls =
   warn_deprecated_cutrewrite ();

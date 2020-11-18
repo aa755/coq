@@ -375,8 +375,14 @@ behavior.)
       | !
       | par
 
-   Applies :token:`ltac_expr` to the selected goals.  It can only be used at the top
-   level of a tactic expression; it cannot be used within a tactic expression.
+   Reorders the goals and applies :token:`ltac_expr` to the selected goals.  It can
+   only be used at the top level of a tactic expression; it cannot be used within a
+   tactic expression.  The selected goals are reordered so they appear after the
+   lowest-numbered selected goal, ordered by goal number.  :ref:`Example
+   <reordering_goals_ex>`.  If the selector applies
+   to a single goal or to all goals, the reordering will not be apparent.  The order of
+   the goals in the :token:`selector` is irrelevant.  (This may not be what you expect;
+   see `#8481 <https://github.com/coq/coq/issues/8481>`_.)
 
    .. todo why shouldn't "all" and "!" be accepted anywhere a @selector is accepted?
       It would be simpler to explain.
@@ -429,6 +435,19 @@ Selectors can also be used nested within a tactic expression with the
 .. exn:: No such goal.
    :name: No such goal. (Goal selector)
    :undocumented:
+
+.. _reordering_goals_ex:
+
+.. example:: Selector reordering goals
+
+   .. coqtop:: reset in
+
+      Goal 1=0 /\ 2=0 /\ 3=0.
+
+   .. coqtop:: all
+
+      repeat split.
+      1,3: idtac.
 
 .. TODO change error message index entry
 
@@ -860,7 +879,8 @@ Print/identity tactic: idtac
 .. tacn:: idtac {* {| @ident | @string | @int } }
    :name: idtac
 
-   Leaves the proof unchanged and prints the given tokens. Strings and integers are printed
+   Leaves the proof unchanged and prints the given tokens. :token:`String<string>`\s
+   and :token:`int`\s are printed
    literally. If :token:`ident` is an |Ltac| variable, its contents are printed; if not, it
    is an error.
 
@@ -918,7 +938,7 @@ Failing
 
       .. todo the example is too long; could show the Goal True. Proof. once and hide the Aborts
          to shorten it.  And add a line of text before each subexample.  Perhaps add some very short
-         explanations/generalizations (eg gfail always fails; "tac; fail" succeeds but "fail." alone
+         explanations/generalizations (e.g. gfail always fails; "tac; fail" succeeds but "fail." alone
          fails.
 
       .. coqtop:: reset all fail
@@ -1122,12 +1142,14 @@ Pattern matching on terms: match
    then the :token:`ltac_expr` can't use `S` to refer to the constructor of `nat`
    without qualifying the constructor as `Datatypes.S`.
 
-   .. todo below: is matching non-linear unification?  is it the same or different
-      from unification elsewhere in Coq?
+   .. todo how does this differ from the 1-2 other unification routines elsewhere in Coq?
+      Does it use constr_eq or eq_constr_nounivs?
 
    Matching is non-linear: if a
    metavariable occurs more than once, each occurrence must match the same
-   expression.  Matching is first-order except on variables of the form :n:`@?@ident`
+   expression.  Expressions match if they are syntactically equal or are
+   :term:`α-convertible <alpha-convertible>`.
+   Matching is first-order except on variables of the form :n:`@?@ident`
    that occur in the head position of an application. For these variables,
    matching is second-order and returns a functional term.
 
@@ -1305,20 +1327,20 @@ Pattern matching on terms: match
 
    .. example:: Multiple matches for a "context" pattern.
 
-      Internally "x <> y" is represented as "(not x y)", which produces the
+      Internally "x <> y" is represented as "(~ (x = y))", which produces the
       first match.
 
       .. coqtop:: in reset
 
          Ltac f t := match t with
-                    | context [ (not ?t) ] => idtac "?t = " t; fail
+                    | context [ (~ ?t) ] => idtac "?t = " t; fail
                     | _ => idtac
                     end.
          Goal True.
 
       .. coqtop:: all
 
-         f ((not True) <> (not False)).
+         f ((~ True) <> (~ False)).
 
 .. _ltac-match-goal:
 
@@ -1344,6 +1366,13 @@ Pattern matching on goals and hypotheses: match goal
    more subpatterns to match hypotheses followed by a subpattern to match the conclusion.  Except for the
    differences noted below, this works the same as the corresponding :n:`@match_key @ltac_expr` construct
    (see :tacn:`match`).  Each current goal is processed independently.
+
+   Matching is non-linear: if a
+   metavariable occurs more than once, each occurrence must match the same
+   expression.  Within a single term, expressions match if they are syntactically equal or
+   :term:`α-convertible <alpha-convertible>`.  When a metavariable is used across
+   multiple hypotheses or across a hypothesis and the current goal, the expressions match if
+   they are :term:`convertible`.
 
    :n:`{*, @match_hyp }`
       Patterns to match with hypotheses.  Each pattern must match a distinct hypothesis in order
@@ -1381,7 +1410,7 @@ Pattern matching on goals and hypotheses: match goal
            :cmd:`Import` `ListNotations`) must be parenthesized or, for the fourth form,
            use double brackets: `[ [ ?l ] ]`.
 
-         :n:`@term__binder`\s in the form `[?x ; ?y]` for a list is not parsed correctly.  The workaround is
+         :n:`@term__binder`\s in the form `[?x ; ?y]` for a list are not parsed correctly.  The workaround is
          to add parentheses or to use the underlying term instead of the notation, i.e. `(cons ?x ?y)`.
 
       If there are multiple :token:`match_hyp`\s in a branch, there may be multiple ways to match them to hypotheses.
@@ -1460,7 +1489,7 @@ Examples:
       match_context_rule ::= [ {*, @match_hyp } |- @match_pattern ] => @ltac_expr
       match_hyp ::= | @name := {? [ @match_pattern ] : } @match_pattern
 
-.. todo PR The following items (up to numgoals) are part of "value_tactic".  I'd like to make
+.. todo The following items (up to numgoals) are part of "value_tactic".  I'd like to make
    this a subsection and explain that they all return values.  How do I get a 5th-level section title?
 
 Filling a term context
@@ -1701,6 +1730,8 @@ Defining |Ltac| symbols
 
 |Ltac| toplevel definitions are made as follows:
 
+.. index:: ::=
+
 .. cmd:: Ltac @tacdef_body {* with @tacdef_body }
    :name: Ltac
 
@@ -1725,10 +1756,15 @@ Defining |Ltac| symbols
       Defines a user-defined symbol, but gives an error if the symbol has already
       been defined.
 
-.. todo apparent inconsistency: "Ltac intros := idtac" seems like it redefines/hides an existing tactic,
-      but in fact it creates a tactic which can only be called by it's qualified name.  This is true in general
-      of tactic notations.  The only way to overwrite most primitive tactics, and any user-defined tactic
-      notation, is with another tactic notation.
+      .. todo apparent inconsistency:
+
+         "Ltac intros := idtac" seems like it redefines/hides an
+         existing tactic, but in fact it creates a tactic which can
+         only be called by its qualified name.  This is true in
+         general of tactic notations.  The only way to overwrite most
+         primitive tactics, and any user-defined tactic notation, is
+         with another tactic notation.
+
       .. exn:: There is already an Ltac named @qualid
          :undocumented:
 
@@ -1738,7 +1774,8 @@ Defining |Ltac| symbols
       do not count as user-defined tactics for `::=`.  If :attr:`local` is not
       specified, the redefinition applies across module boundaries.
 
-      .. exn: There is no Ltac named @qualid
+      .. exn:: There is no Ltac named @qualid
+         :undocumented:
 
    :n:`{* with @tacdef_body }`
       Permits definition of mutually recursive tactics.

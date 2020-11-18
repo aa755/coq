@@ -25,8 +25,8 @@ tactics for solving arithmetic goals over :math:`\mathbb{Q}`,
   ``n`` is an optional integer limiting the proof search depth,
   is an incomplete proof procedure for non-linear arithmetic.
   It is based on John Harrison’s HOL Light
-  driver to the external prover `csdp` [#csdp]_. Note that the `csdp` driver is
-  generating a *proof cache* which makes it possible to rerun scripts
+  driver to the external prover `csdp` [#csdp]_. Note that the `csdp` driver
+  generates a *proof cache* which makes it possible to rerun scripts
   even without `csdp`.
 
 .. flag:: Simplex
@@ -61,18 +61,25 @@ tactics for solving arithmetic goals over :math:`\mathbb{Q}`,
 
 The tactics solve propositional formulas parameterized by atomic
 arithmetic expressions interpreted over a domain :math:`D \in \{\mathbb{Z},\mathbb{Q},\mathbb{R}\}`.
-The syntax of the formulas is the following:
+The syntax for formulas over :math:`\mathbb{Z}` is:
 
- .. productionlist:: F
-   F : A ∣ P ∣ True ∣ False ∣ F ∧ F ∣ F ∨ F ∣ F ↔ F ∣ F → F ∣ ¬ F
-   A : p = p ∣ p > p ∣ p < p ∣ p ≥ p ∣ p ≤ p
-   p : c ∣ x ∣ −p ∣ p − p ∣ p + p ∣ p × p ∣ p ^ n
+   .. note the following is not an insertprodn
 
-where :math:`c` is a numeric constant, :math:`x \in D` is a numeric variable, the
-operators :math:`−, +, ×` are respectively subtraction, addition, and product;
-:math:`p ^ n` is exponentiation by a constant :math:`n`, :math:`P` is an arbitrary proposition.
-For :math:`\mathbb{Q}`, equality is not Leibniz equality ``=`` but the equality of
-rationals ``==``.
+   .. prodn::
+      F ::= {| @A | P | True | False | @F /\\ @F | @F \\/ @F | @F <-> @F | @F -> @F | ~ @F }
+      A ::= {| @p = @p | @p > @p | @p < @p | @p >= @p | @p <= @p }
+      p ::= {| c | x | −@p | @p − @p | @p + @p | @p * @p | @p ^ n }
+
+where
+
+  - :n:`P` is an arbitrary proposition
+  - :n:`c` is a numeric constant of :math:`D`
+  - :n:`x` :math:`\in D` is a numeric variable
+  - :n:`−`, :n:`+` and :n:`*` are respectively subtraction, addition and product
+  - :n:`p ^ n` is exponentiation by a constant :math:`n`
+
+For :math:`\mathbb{Q}`, use the equality of rationals ``==`` rather than
+Leibniz equality ``=``.
 
 For :math:`\mathbb{Z}` (resp. :math:`\mathbb{Q}`), :math:`c` ranges over integer constants (resp. rational
 constants). For :math:`\mathbb{R}`, the tactic recognizes as real constants the
@@ -152,7 +159,7 @@ High level view of `lia`
 Over :math:`\mathbb{R}`, *positivstellensatz* refutations are a complete proof
 principle [#mayfail]_. However, this is not the case over :math:`\mathbb{Z}`. Actually,
 *positivstellensatz* refutations are not even sufficient to decide
-linear *integer* arithmetic. The canonical example is :math:`2 * x = 1 -> \mathtt{False}`
+linear *integer* arithmetic. The canonical example is :math:`2 * x = 1 \to \mathtt{False}`
 which is a theorem of :math:`\mathbb{Z}` but not a theorem of :math:`{\mathbb{R}}`. To remedy this
 weakness, the :tacn:`lia` tactic is using recursively a combination of:
 
@@ -173,7 +180,7 @@ are a way to take into account the discreteness of :math:`\mathbb{Z}` by roundin
    Let :math:`p` be an integer and :math:`c` a rational constant. Then
    :math:`p \ge c \rightarrow p \ge \lceil{c}\rceil`.
 
-For instance, from 2 x = 1 we can deduce
+For instance, from :math:`2 x = 1` we can deduce
 
 + :math:`x \ge 1/2` whose cut plane is :math:`x \ge \lceil{1/2}\rceil = 1`;
 + :math:`x \le 1/2` whose cut plane is :math:`x \le \lfloor{1/2}\rfloor = 0`.
@@ -236,7 +243,7 @@ proof by abstracting monomials by variables.
 `psatz`: a proof procedure for non-linear arithmetic
 ----------------------------------------------------
 
-.. tacn:: psatz
+.. tacn:: psatz @one_term {? @int_or_var }
    :name: psatz
 
    This tactic explores the *Cone* by increasing degrees – hence the
@@ -276,7 +283,6 @@ obtain :math:`-1`. By Theorem :ref:`Psatz <psatz_thm>`, the goal is valid.
    + To support :g:`Z.div` and :g:`Z.modulo`: ``Ltac Zify.zify_post_hook ::= Z.div_mod_to_equations``.
    + To support :g:`Z.quot` and :g:`Z.rem`: ``Ltac Zify.zify_post_hook ::= Z.quot_rem_to_equations``.
    + To support :g:`Z.div`, :g:`Z.modulo`, :g:`Z.quot`, and :g:`Z.rem`: ``Ltac Zify.zify_post_hook ::= Z.to_euclidean_division_equations``.
-
 
 .. cmd:: Show Zify InjTyp
    :name: Show Zify InjTyp

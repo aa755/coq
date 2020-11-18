@@ -832,7 +832,7 @@ let pr_goal_selector ~toplevel s =
             ++ pr_non_empty_arg (pr_clauses (Some true) pr.pr_name) h
           )
         | TacChange (check,op,c,h) ->
-          let name = if check then "change_no_check" else "change" in
+          let name = if check then "change" else "change_no_check" in
           hov 1 (
             primitive name ++ brk (1,1)
             ++ (
@@ -1339,8 +1339,8 @@ let () =
   ;
   Genprint.register_print0
     wit_constr
-    (lift_env Ppconstr.pr_lconstr_expr)
-    (lift_env (fun env sigma (c, _) -> pr_lglob_constr_pptac env sigma c))
+    (lift_env Ppconstr.pr_constr_expr)
+    (lift_env (fun env sigma (c, _) -> pr_glob_constr_pptac env sigma c))
     (make_constr_printer Printer.pr_econstr_n_env)
   ;
   Genprint.register_print0

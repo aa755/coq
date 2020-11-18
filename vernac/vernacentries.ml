@@ -345,17 +345,21 @@ let dump_universes_gen prl g s =
     close ();
     Exninfo.iraise reraise
 
-let universe_subgraph ?loc g univ =
+let universe_subgraph ?loc kept univ =
   let open Univ in
   let sigma = Evd.from_env (Global.env()) in
-  let univs_of q =
+  let parse q =
     let q =  Glob_term.(GType q) in
     (* this function has a nice error message for not found univs *)
-    LSet.singleton (Pretyping.interp_known_glob_level ?loc sigma q)
+    Pretyping.interp_known_glob_level ?loc sigma q
   in
-  let univs = List.fold_left (fun univs q -> LSet.union univs (univs_of q)) LSet.empty g in
-  let csts = UGraph.constraints_for ~kept:(LSet.add Level.prop (LSet.add Level.set univs)) univ in
-  let univ = LSet.fold UGraph.add_universe_unconstrained univs UGraph.initial_universes in
+  let kept = List.fold_left (fun kept q -> LSet.add (parse q) kept) LSet.empty kept in
+  let csts = UGraph.constraints_for ~kept univ in
+  let add u newgraph =
+    let strict = UGraph.check_constraint univ (Level.set,Lt,u) in
+    UGraph.add_universe u ~lbound:UGraph.Bound.Set ~strict newgraph
+  in
+  let univ = LSet.fold add kept UGraph.initial_universes in
   UGraph.merge_constraints csts univ
 
 let print_universes ?loc ~sort ~subgraph dst =
@@ -927,9 +931,15 @@ let interp_filter_in m = function
 
 let vernac_import export refl =
   let import_mod (qid,f) =
-    let m = try Nametab.locate_module qid
+    let loc = qid.loc in
+    let m = try
+        let m = Nametab.locate_module qid in
+        let () = if Modops.is_functor (Global.lookup_module m).Declarations.mod_type
+          then CErrors.user_err ?loc Pp.(str "Cannot import functor " ++ pr_qualid qid ++ str".")
+        in
+        m
       with Not_found ->
-        CErrors.user_err Pp.(str "Cannot find module " ++ pr_qualid qid)
+        CErrors.user_err ?loc Pp.(str "Cannot find module " ++ pr_qualid qid)
     in
     let f = interp_filter_in m f in
     Declaremods.import_module f ~export m
@@ -1596,7 +1606,7 @@ let query_command_selector ?loc = function
   | _ -> user_err ?loc ~hdr:"query_command_selector"
       (str "Query commands only support the single numbered goal selector.")
 
-let vernac_check_may_eval ~pstate ~atts redexp glopt rc =
+let vernac_check_may_eval ~pstate redexp glopt rc =
   let glopt = query_command_selector glopt in
   let sigma, env = get_current_context_of_args ~pstate glopt in
   let sigma, c = Constrintern.interp_open_constr ~expected_type:Pretyping.UnknownIfTermOrType env sigma rc in
@@ -1696,7 +1706,7 @@ let print_about_hyp_globs ~pstate ?loc ref_or_by_not udecl glopt =
     let sigma, env = get_current_or_global_context ~pstate in
     Prettyp.print_about env sigma ref_or_by_not udecl
 
-let vernac_print ~pstate ~atts =
+let vernac_print ~pstate =
   let sigma, env = get_current_or_global_context ~pstate in
   function
   | PrintTypingFlags -> pr_typing_flags (Environ.typing_flags (Global.env ()))
@@ -2157,8 +2167,9 @@ let translate_vernac ~atts v = let open Vernacextend in match v with
         vernac_print_option key)
   | VernacCheckMayEval (r,g,c) ->
     VtReadProofOpt(fun ~pstate ->
+        unsupported_attributes atts;
         Feedback.msg_notice @@
-        vernac_check_may_eval ~pstate ~atts r g c)
+        vernac_check_may_eval ~pstate r g c)
   | VernacDeclareReduction (s,r) ->
     VtDefault(fun () ->
         with_locality ~atts vernac_declare_reduction s r)
@@ -2168,13 +2179,15 @@ let translate_vernac ~atts v = let open Vernacextend in match v with
         Feedback.msg_notice @@ vernac_global_check c)
   | VernacPrint p ->
     VtReadProofOpt(fun ~pstate ->
-        Feedback.msg_notice @@ vernac_print ~pstate ~atts p)
+        unsupported_attributes atts;
+        Feedback.msg_notice @@ vernac_print ~pstate p)
   | VernacSearch (s,g,r) ->
     VtReadProofOpt(
         unsupported_attributes atts;
         vernac_search ~atts s g r)
-  | VernacLocate l -> unsupported_attributes atts;
+  | VernacLocate l ->
     VtReadProofOpt(fun ~pstate ->
+        unsupported_attributes atts;
         Feedback.msg_notice @@ vernac_locate ~pstate l)
   | VernacRegister (qid, r) ->
     VtNoProof(fun () ->

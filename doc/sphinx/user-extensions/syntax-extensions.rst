@@ -241,12 +241,12 @@ notation is the insertion of spaces at some places of the notation.
 This is performed by adding extra spaces between the symbols and
 parameters: each extra space (other than the single space needed to
 separate the components) is interpreted as a space to be inserted by
-the printer. Here is an example showing how to add spaces around the
-bar of the notation.
+the printer. Here is an example showing how to add spaces next to the
+curly braces.
 
 .. coqtop:: in
 
-   Notation "{{ x : A | P }}" := (sig (fun x : A => P)) (at level 0, x at level 99).
+   Notation "{{  x : A | P  }}" := (sig (fun x : A => P)) (at level 0, x at level 99).
 
 .. coqtop:: all
 
@@ -368,8 +368,8 @@ a :token:`decl_notations` clause after the definition of the (co)inductive type 
 (co)recursive term (or after the definition of each of them in case of mutual
 definitions). The exact syntax is given by :n:`@decl_notation` for inductive,
 co-inductive, recursive and corecursive definitions and in :ref:`record-types`
-for records. Note that only syntax modifiers that do not require to add or
-change a parsing rule are accepted.
+for records. Note that only syntax modifiers that do not require adding or
+changing a parsing rule are accepted.
 
    .. insertprodn decl_notations decl_notation
 
@@ -1877,12 +1877,12 @@ Tactic notations allow customizing the syntax of tactics.
         - :tacn:`unfold`, :tacn:`with_strategy`
 
       * - ``constr``
-        - :token:`term`
+        - :token:`one_term`
         - a term
         - :tacn:`exact`
 
       * - ``uconstr``
-        - :token:`term`
+        - :token:`one_term`
         - an untyped term
         - :tacn:`refine`
 

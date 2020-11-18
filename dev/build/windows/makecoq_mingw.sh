@@ -1167,7 +1167,7 @@ function make_menhir {
   make_ocaml
   make_findlib
   make_ocamlbuild
-  if build_prep https://gitlab.inria.fr/fpottier/menhir/-/archive/20200525 menhir-20200525 tar.gz 1 ; then
+  if build_prep https://gitlab.inria.fr/fpottier/menhir/-/archive/20200624 menhir-20200624 tar.gz 1 ; then
     # ToDo: don't know if this is the intended / most reliable to do it, but it works
     log2 dune build @install
     log2 dune install menhir menhirSdk menhirLib
@@ -1273,7 +1273,7 @@ function make_elpi {
   make_dune
   make_re
 
-  if build_prep https://github.com/LPCIC/elpi/archive v1.11.0 tar.gz 1 elpi; then
+  if build_prep https://github.com/LPCIC/elpi/archive v1.11.4 tar.gz 1 elpi-base; then
 
     log2 dune build -p elpi
     log2 dune install elpi
@@ -1839,12 +1839,12 @@ function make_addon_vst {
   installer_addon_dependency_beg vst
   make_addon_compcert
   installer_addon_dependency_end
-  if build_prep_overlay vst_platform vst; then
+  if build_prep_overlay vst; then
     installer_addon_section vst "VST" "ATTENTION: SOME INCLUDED COMPCERT PARTS ARE NOT OPEN SOURCE! Verified Software Toolchain for verifying C code" "off"
     # log1 coq_set_timeouts_1000
     # The usage of the shell variable ARCH in VST collides with the usage in this shellscript
     logn make env -u ARCH make IGNORECOQVERSION=true $MAKE_OPT
-    logn install env -u ARCH make install
+    logn install env -u ARCH make IGNORECOQVERSION=true install
     build_post
   fi
 }

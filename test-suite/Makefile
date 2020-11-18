@@ -301,20 +301,20 @@ endif
 
 unit-tests/src/utest.cmx: unit-tests/src/utest.ml unit-tests/src/utest.cmi
 	$(SHOW) 'OCAMLOPT  $<'
-	$(HIDE)$(OCAMLOPT) -c -I unit-tests/src -package oUnit $<
+	$(HIDE)$(OCAMLOPT) -c -I unit-tests/src -package ounit2 $<
 unit-tests/src/utest.cmo: unit-tests/src/utest.ml unit-tests/src/utest.cmi
 	$(SHOW) 'OCAMLC  $<'
-	$(HIDE)$(OCAMLC) -c -I unit-tests/src -package oUnit $<
+	$(HIDE)$(OCAMLC) -c -I unit-tests/src -package ounit2 $<
 unit-tests/src/utest.cmi: unit-tests/src/utest.mli
 	$(SHOW) 'OCAMLC  $<'
-	$(HIDE)$(OCAMLC) -package oUnit -c $<
+	$(HIDE)$(OCAMLC) -package ounit2 -c $<
 
 unit-tests: $(UNIT_LOGFILES)
 
 # Build executable, run it to generate log file
 unit-tests/%.ml.log: unit-tests/%.ml unit-tests/src/$(UNIT_LINK)
 	$(SHOW) 'TEST      $<'
-	$(HIDE)$(OCAMLBEST) -linkall -linkpkg -package coq.toplevel,oUnit \
+	$(HIDE)$(OCAMLBEST) -linkall -linkpkg -package coq.toplevel,ounit2 \
 	     -I unit-tests/src $(UNIT_LINK) $< -o $<.test;
 	$(HIDE)./$<.test
 
@@ -501,8 +501,8 @@ $(addsuffix .log,$(wildcard output-coqchk/*.v)): %.v.log: %.v %.out $(PREREQUISI
 	} > "$(shell dirname $<)/$(shell basename $< .v).chk.log"; fi
 
 .PHONY: approve-output
-approve-output: output output-coqtop
-	$(HIDE)for f in output/*.out.real; do \
+approve-output: output output-coqtop output-coqchk
+	$(HIDE)for f in $(wildcard $(addsuffix /*.out.real,$^)); do \
 	  mv "$$f" "$${f%.real}"; \
 	  echo "Updated $${f%.real}!"; \
 	done

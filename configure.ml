@@ -12,12 +12,12 @@
 #load "str.cma"
 open Printf
 
-let coq_version = "8.12.0"
-let coq_macos_version = "8.12.0" (** "[...] should be a string comprised of
+let coq_version = "8.12.1"
+let coq_macos_version = "8.12.1" (** "[...] should be a string comprised of
 three non-negative, period-separated integers [...]" *)
 let vo_magic = 81200
 let state_magic = 581200
-let is_a_released_version = false
+let is_a_released_version = true
 let distributed_exec =
   ["coqtop.opt"; "coqidetop.opt"; "coqqueryworker.opt"; "coqproofworker.opt"; "coqtacticworker.opt";
    "coqc.opt";"coqchk";"coqdoc";"coqworkmgr";"coq_makefile";"coq-tex";"coqwc";"csdpcert";"coqdep";"votour"]
@@ -569,14 +569,18 @@ let caml_version_nums =
          "Is it installed properly?")
 
 let check_caml_version () =
-  if caml_version_nums >= [4;5;0] then
+  if caml_version_nums >= [4;5;0] && caml_version_nums < [4;12;0] then
     cprintf "You have OCaml %s. Good!" caml_version
   else
     let () = cprintf "Your version of OCaml is %s." caml_version in
     if !prefs.force_caml_version then
-      warn "Your version of OCaml is outdated."
+      if caml_version_nums >= [4;12;0] then
+        warn ("This version of Coq should be considered incompatible with OCaml 4.12.\n \
+               See https://github.com/coq/coq/issues/12636")
+      else
+        warn "Your version of OCaml is outdated."
     else
-      die "You need OCaml 4.05.0 or later."
+      die "You need a version of OCaml between 4.05 and 4.11."
 
 let _ = check_caml_version ()
 

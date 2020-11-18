@@ -90,6 +90,10 @@ constructions. There are two variants of them.
 First destructuring let syntax
 ++++++++++++++++++++++++++++++
 
+.. todo explain that this applies to all of the "let" constructs (Gallina, Ltac1 and Ltac2)
+   also add "irrefutable pattern" to the glossary
+   note that in Ltac2 an upper case ident is a constructor, lower case is a variable
+
 The expression :n:`let ( {*, @ident__i } ) := @term__0 in @term__1`
 performs case analysis on :n:`@term__0` whose type must be an
 inductive type with exactly one constructor.  The number of variables
@@ -876,10 +880,10 @@ Here is a summary of the error messages corresponding to each
 situation:
 
 .. exn:: The constructor @ident expects @num arguments.
+         The variable ident is bound several times in pattern term
+         Found a constructor of inductive type term while a constructor of term is expected
 
-   The variable ident is bound several times in pattern termFound a constructor
-   of inductive type term while a constructor of term is expectedPatterns are
-   incorrect (because constructors are not applied to the correct number of the
+   Patterns are incorrect (because constructors are not applied to the correct number of
    arguments, because they are not linear or they are wrongly typed).
 
 .. exn:: Non exhaustive pattern matching.

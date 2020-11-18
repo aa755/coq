@@ -494,7 +494,11 @@ class ProductionObject(CoqObject):
                 loc = os.path.basename(get_node_location(signode))
                 raise ExtensionError(ProductionObject.SIG_ERROR.format(loc, signature))
 
-        self.signatures.append((lhs, op, rhs))
+        parts = rhs.split("   ", maxsplit=1)
+        rhs = parts[0].strip()
+        tag = parts[1].strip() if len(parts) == 2 else ""
+
+        self.signatures.append((lhs, op, rhs, tag))
         return [('token', lhs)] if op == '::=' else None
 
     def _add_index_entry(self, name, target):
@@ -513,21 +517,21 @@ class ProductionObject(CoqObject):
         self.signatures = []
         indexnode = super().run()[0]  # makes calls to handle_signature
 
-        table = nodes.inline(classes=['prodn-table'])
-        tgroup = nodes.inline(classes=['prodn-column-group'])
-        for _ in range(3):
-            tgroup += nodes.inline(classes=['prodn-column'])
+        table = nodes.container(classes=['prodn-table'])
+        tgroup = nodes.container(classes=['prodn-column-group'])
+        for _ in range(4):
+            tgroup += nodes.container(classes=['prodn-column'])
         table += tgroup
-        tbody = nodes.inline(classes=['prodn-row-group'])
+        tbody = nodes.container(classes=['prodn-row-group'])
         table += tbody
 
         # create rows
         for signature in self.signatures:
-            lhs, op, rhs = signature
+            lhs, op, rhs, tag = signature
             position = self.state_machine.get_source_and_line(self.lineno)
 
-            row = nodes.inline(classes=['prodn-row'])
-            entry = nodes.inline(classes=['prodn-cell-nonterminal'])
+            row = nodes.container(classes=['prodn-row'])
+            entry = nodes.container(classes=['prodn-cell-nonterminal'])
             if lhs != "":
                 target_name = 'grammar-token-' + nodes.make_id(lhs)
                 target = nodes.target('', '', ids=[target_name], names=[target_name])
@@ -537,15 +541,19 @@ class ProductionObject(CoqObject):
                 entry += inline
                 entry += notation_to_sphinx('@'+lhs, *position)
             else:
-                entry += nodes.literal('', '')
+                entry += nodes.Text('')
             row += entry
 
-            entry = nodes.inline(classes=['prodn-cell-op'])
-            entry += nodes.literal(op, op)
+            entry = nodes.container(classes=['prodn-cell-op'])
+            entry += nodes.Text(op)
             row += entry
 
-            entry = nodes.inline(classes=['prodn-cell-production'])
+            entry = nodes.container(classes=['prodn-cell-production'])
             entry += notation_to_sphinx(rhs, *position)
+            row += entry
+
+            entry = nodes.container(classes=['prodn-cell-tag'])
+            entry += nodes.Text(tag)
             row += entry
 
             tbody += row
@@ -1161,7 +1169,7 @@ class StdGlossaryIndex(Index):
         return content, False
 
 def GrammarProductionRole(typ, rawtext, text, lineno, inliner, options={}, content=[]):
-    """A grammar production not included in a ``productionlist`` directive.
+    """A grammar production not included in a ``prodn`` directive.
 
     Useful to informally introduce a production, as part of running text.
 
@@ -1169,10 +1177,8 @@ def GrammarProductionRole(typ, rawtext, text, lineno, inliner, options={}, conte
 
        :production:`string` indicates a quoted string.
 
-    You're not likely to use this role very commonly; instead, use a
-    `production list
-    <http://www.sphinx-doc.org/en/stable/markup/para.html#directive-productionlist>`_
-    and reference its tokens using ``:token:`…```.
+    You're not likely to use this role very commonly; instead, use a ``prodn``
+    directive and reference its tokens using ``:token:`…```.
     """
     #pylint: disable=dangerous-default-value, unused-argument
     env = inliner.document.settings.env
@@ -1418,11 +1424,11 @@ def setup(app):
     app.connect('doctree-resolved', CoqtopBlocksTransform.merge_consecutive_coqtop_blocks)
 
     # Add extra styles
-    app.add_stylesheet("ansi.css")
-    app.add_stylesheet("coqdoc.css")
-    app.add_javascript("notations.js")
-    app.add_stylesheet("notations.css")
-    app.add_stylesheet("pre-text.css")
+    app.add_css_file("ansi.css")
+    app.add_css_file("coqdoc.css")
+    app.add_js_file("notations.js")
+    app.add_css_file("notations.css")
+    app.add_css_file("pre-text.css")
 
     # Tell Sphinx about extra settings
     app.add_config_value("report_undocumented_coq_objects", None, 'env')
