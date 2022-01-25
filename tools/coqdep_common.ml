@@ -33,6 +33,7 @@ type dynlink = Opt | Byte | Both | No | Variable
 let option_noglob = ref false
 let option_dynlink = ref Both
 let option_boot = ref false
+let option_compute_missing = ref false
 
 type dir = string option
 
@@ -194,6 +195,11 @@ let warning_module_notfound from f s =
       coqdep_warning "in file %s, library %s is required from root %s and has not been found in the loadpath!"
         f (String.concat "." s) (String.concat "." pth)
 
+let warning_multiple_paths_match f s lppath suffix =
+  let logpath = (String.concat "." s) in
+  coqdep_warning "in file %s, library %s is required and has not been found in the loadpath! the library's logical path's largest matching prefix (%s) matches multiple physical directories %s"
+    f logpath (String.sub logpath 0 (String.length logpath - String.length (String.concat "." suffix))) (String.concat "," lppath)
+
 let warning_declare f s =
   coqdep_warning "in file %s, declared ML module %s has not been found!" f s
 
@@ -241,12 +247,16 @@ let safe_assoc from verbose file k =
     particular we can check if "." has been attributed a logical path
     after processing all options and silently give the default one if
     it hasn't. We may also use this to warn if a physical path is met
-    twice. *)
-let register_dir_logpath,find_dir_logpath =
+    twice.*)
+let register_dir_logpath,find_dir_logpath,find_physpath =
   let tbl: (string, string list) Hashtbl.t = Hashtbl.create 19 in
-  let reg physdir logpath = Hashtbl.add tbl (absolute_dir physdir) logpath in
-  let fnd physdir = Hashtbl.find tbl (absolute_dir physdir) in
-  reg,fnd
+  let tbl_rev: (string list, string) Hashtbl.t = Hashtbl.create 19 in
+  let reg physdir logpath =
+    Hashtbl.add tbl (absolute_dir physdir) logpath ;
+    Hashtbl.add tbl_rev logpath (absolute_dir physdir) in
+  let fndl physdir = Hashtbl.find tbl (absolute_dir physdir) in
+  let fndp logpath = Hashtbl.find_all tbl_rev logpath in
+  reg,fndl,fndp
 
 let file_name s = function
   | None     -> s
@@ -314,6 +324,26 @@ let string_of_dependency_list suffix_for_require deps =
     in
   String.concat " " (List.map string_of_dep deps)
 
+(**
+    phys_path_best_match [] logpath = Some (p,s) ->
+    [p] is a list of physical path matching the largest prefix of logpath (logical path) that matches a physical paths.
+    [s] is the unmatched suffix of the logical path. if [p] is empty, then this [s] can be any list.
+*)
+let rec phys_path_best_match (prefix: string list) (logpath: string list) :  (string list * string list) =
+  match logpath with
+  | [] -> (find_physpath prefix, [])
+  | h::tl -> match phys_path_best_match (prefix@[h]) tl with
+             | ([], _) -> (find_physpath prefix, h::tl)
+             | p -> p
+
+let fconcatl (ls: string list) : string =
+    List.fold_left Filename.concat "" ls
+
+(* let phys_path (logpath: string list) : string option =
+ *   match (phys_path_best_match [] logpath) with
+ *   | None -> None
+ *   | Some (ppath, suffix) -> Some (fconcatl (ppath::suffix)) *)
+
 let rec find_dependencies basename =
   let verbose = true in (* for past/future use? *)
   try
@@ -348,7 +378,17 @@ let rec find_dependencies basename =
               | Some files -> List.iter (fun file_str -> add_dep (DepRequire (canonize file_str))) files
               | None ->
                   if verbose && not (is_in_coqlib ?from str) then
-                  warning_module_notfound from f str
+                    let str =
+                      match from with
+                      | None -> str
+                      | Some pth -> pth @ str
+                      in
+                  (if !option_compute_missing then
+                    (match (phys_path_best_match [] str) with
+                    | ([ppath], suffix) -> add_dep (DepRequire (fconcatl (ppath::suffix)))
+                    | ([],_) -> warning_module_notfound f str
+                    | (lppath, suffix) -> warning_multiple_paths_match f str lppath suffix)
+                  else warning_module_notfound f str)
               end) strl
         | Declare sl ->
             let declare suff dir s =
@@ -686,6 +726,7 @@ let rec parse = function
   | "-dyndep" :: "no" :: ll -> option_dynlink := No; parse ll
   | "-dyndep" :: "opt" :: ll -> option_dynlink := Opt; parse ll
   | "-dyndep" :: "byte" :: ll -> option_dynlink := Byte; parse ll
+  | "-compute_missing" :: ll -> option_compute_missing := true; parse ll
   | "-dyndep" :: "both" :: ll -> option_dynlink := Both; parse ll
   | "-dyndep" :: "var" :: ll -> option_dynlink := Variable; parse ll
   | ("-h"|"--help"|"-help") :: _ -> usage ()

@@ -29,6 +29,7 @@ val find_dir_logpath: dirname -> dirpath
 (** Options *)
 val option_sort : bool ref
 val option_boot : bool ref
+val option_compute_missing : bool ref
 
 (** ML-related manipulation *)
 val coq_dependencies : unit -> unit

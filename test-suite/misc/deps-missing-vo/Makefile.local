@@ -1,0 +1,8 @@
+%.v: %.cpp
+	$(error cpp files are not yet supported)
+
+%.v: %.c
+	cp $< $@
+
+%.vo: %.v
+	coqc -Q . test -Q lib2 xxx $<
