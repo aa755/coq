@@ -386,9 +386,9 @@ let rec find_dependencies basename =
                   (if !option_compute_missing then
                     (match (phys_path_best_match [] str) with
                     | ([ppath], suffix) -> add_dep (DepRequire (fconcatl (ppath::suffix)))
-                    | ([],_) -> warning_module_notfound f str
+                    | ([],_) -> warning_module_notfound None f str
                     | (lppath, suffix) -> warning_multiple_paths_match f str lppath suffix)
-                  else warning_module_notfound f str)
+                  else warning_module_notfound None f str)
               end) strl
         | Declare sl ->
             let declare suff dir s =
