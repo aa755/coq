@@ -11,6 +11,7 @@
 open Names
 open Libnames
 open Globnames
+open Flags
 
 type object_prefix = {
   obj_dir : DirPath.t;
@@ -564,14 +565,17 @@ let path_of_universe mp =
   UnivIdMap.find mp !the_univrevtab
 
 (* Shortest qualid functions **********************************************)
-
+(* Names.GlobRef.t -> Libnames.qualid *)
 let shortest_qualid_of_global ?loc ctx ref =
   let open GlobRef in
-  match ref with
+  if !Flags.fqn_print then
+    Libnames.qualid_of_path (path_of_global ref)
+  else
+    match ref with
     | VarRef id -> make_qualid ?loc DirPath.empty id
     | _ ->
-        let sp =  ExtRefMap.find (TrueGlobal ref) !the_globrevtab in
-        ExtRefTab.shortest_qualid ?loc ctx sp !the_ccitab
+       let sp =  ExtRefMap.find (TrueGlobal ref) !the_globrevtab in
+       ExtRefTab.shortest_qualid ?loc ctx sp !the_ccitab
 
 let shortest_qualid_of_abbreviation ?loc ctx kn =
   let sp = path_of_abbreviation kn in
